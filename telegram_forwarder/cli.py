@@ -246,9 +246,9 @@ async def cmd_logout(args, config_manager: ConfigManager, logger: ForwarderLogge
         await wrapper.logout()
         return 0
     except ConfigurationError:
-        # Not configured, just clear session
-        config_manager.clear_session()
-        logger.success("Session cleared")
+        # Not configured, just clear any leftover files
+        config_manager.clear_session(clear_credentials=True)
+        logger.success("Session and credentials cleared")
         return 0
     except Exception as e:
         logger.error(f"Logout failed: {e}")

@@ -151,8 +151,13 @@ class ConfigManager:
         config.api_hash = api_hash
         self.save(config)
     
-    def clear_session(self):
-        """Delete the session file."""
+    def clear_session(self, clear_credentials: bool = True):
+        """Delete the session file and optionally the config.
+        
+        Args:
+            clear_credentials: If True, also delete config.json with API credentials
+        """
+        # Delete session file
         session_file = self.session_path.with_suffix('.session')
         if session_file.exists():
             session_file.unlink()
@@ -160,6 +165,11 @@ class ConfigManager:
         # Also try without suffix
         if self.session_path.exists():
             self.session_path.unlink()
+        
+        # Delete config file with credentials
+        if clear_credentials and self.config_file.exists():
+            self.config_file.unlink()
+            self._config = None
     
     def has_session(self) -> bool:
         """Check if a session file exists."""

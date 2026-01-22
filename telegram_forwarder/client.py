@@ -184,7 +184,7 @@ class ClientWrapper:
             raise SessionError(f"Login failed: {e}")
     
     async def logout(self):
-        """Log out and clear session."""
+        """Log out, clear session, and remove credentials."""
         if self._client:
             try:
                 await self._client.log_out()
@@ -192,12 +192,12 @@ class ClientWrapper:
                 pass
             await self._client.disconnect()
         
-        self.config_manager.clear_session()
+        self.config_manager.clear_session(clear_credentials=True)
         self._client = None
         self._me = None
         
         if self.logger:
-            self.logger.success("Logged out and session cleared")
+            self.logger.success("Logged out, session and credentials cleared")
     
     async def disconnect(self):
         """Disconnect from Telegram."""
