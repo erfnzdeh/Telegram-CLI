@@ -234,10 +234,15 @@ class ClientWrapper:
             
             # Determine chat type
             if isinstance(entity, User):
-                chat_type = "Private"
-                title = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
-                if entity.username:
-                    title += f" (@{entity.username})"
+                # Check if this is "Saved Messages" (chat with yourself)
+                if entity.is_self:
+                    chat_type = "Saved"
+                    title = "Saved Messages"
+                else:
+                    chat_type = "Private"
+                    title = f"{entity.first_name or ''} {entity.last_name or ''}".strip()
+                    if entity.username:
+                        title += f" (@{entity.username})"
             elif isinstance(entity, Chat):
                 chat_type = "Group"
                 title = entity.title

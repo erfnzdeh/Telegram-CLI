@@ -154,7 +154,7 @@ async def get_chat_type(client, chat_id: Union[int, str]) -> ChatType:
 
 
 async def estimate_message_count(client, chat_id: Union[int, str], min_id: int = 0) -> int:
-    """Estimate total messages in chat for progress display.
+    """Get total messages in chat for progress display.
     
     Args:
         client: Telethon client
@@ -162,37 +162,47 @@ async def estimate_message_count(client, chat_id: Union[int, str], min_id: int =
         min_id: Minimum message ID (for resume operations)
         
     Returns:
-        Estimated message count
+        Message count (exact for full count, estimated for resume)
     """
-    latest_id = 0
-    async for msg in client.iter_messages(chat_id, limit=1):
-        latest_id = msg.id
+    # Use get_messages with limit=0 to get just the count
+    # This returns a TotalList with .total attribute
+    messages = await client.get_messages(chat_id, limit=0)
+    total = messages.total if messages.total else 0
     
-    if latest_id == 0:
+    if total == 0:
         return 0
     
-    # If resuming, calculate remaining
+    # If resuming, we can only estimate remaining
+    # Count messages with min_id filter
     if min_id > 0:
-        return max(0, latest_id - min_id)
+        remaining = await client.get_messages(chat_id, limit=0, min_id=min_id)
+        return remaining.total if remaining.total else 0
     
-    # Return latest ID as upper bound estimate
-    return latest_id
+    return total
 
 
-def format_estimate(count: int) -> str:
-    """Format message count with ~ prefix for estimates.
+def format_count(count: int, approximate: bool = False) -> str:
+    """Format message count in human-readable format.
     
     Args:
         count: Number of messages
+        approximate: If True, prefix with ~
         
     Returns:
-        Human-readable string like "~12.5K messages"
+        Human-readable string like "12.5K messages" or "~12.5K messages"
     """
+    prefix = "~" if approximate else ""
     if count >= 1_000_000:
-        return f"~{count / 1_000_000:.1f}M messages"
+        return f"{prefix}{count / 1_000_000:.1f}M messages"
     if count >= 1000:
-        return f"~{count / 1000:.1f}K messages"
-    return f"~{count} messages"
+        return f"{prefix}{count / 1000:.1f}K messages"
+    return f"{prefix}{count} messages"
+
+
+# Alias for backwards compatibility
+def format_estimate(count: int) -> str:
+    """Format message count (deprecated, use format_count)."""
+    return format_count(count, approximate=False)
 
 
 def format_duration(seconds: float) -> str:
