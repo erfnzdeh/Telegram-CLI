@@ -79,6 +79,48 @@ class Forwarder:
         self.delay_between_destinations = delay_between_destinations
         self._live_handler = None
     
+    async def _forward_single_message(
+        self,
+        message: Message,
+        dest_id: int,
+        drop_author: bool = False,
+        retry_count: int = 3
+    ) -> Optional[Message]:
+        """Forward a single message with retries.
+        
+        Args:
+            message: Message to forward
+            dest_id: Destination chat ID
+            drop_author: Remove "Forwarded from" header
+            retry_count: Number of retries on transient errors
+            
+        Returns:
+            Forwarded message or None if failed
+        """
+        for attempt in range(retry_count):
+            try:
+                result = await self.client.forward_messages(
+                    dest_id,
+                    message,
+                    drop_author=drop_author,
+                    drop_media_captions=False
+                )
+                return result[0] if isinstance(result, list) else result
+                
+            except errors.FloodWaitError as e:
+                await handle_long_flood_wait(e.seconds, self.logger)
+                # Continue to retry
+                
+            except Exception as e:
+                if attempt < retry_count - 1:
+                    wait_time = (attempt + 1) * 2  # 2s, 4s, 6s
+                    self.logger.verbose(f"Retry {attempt + 1}/{retry_count} for msg {message.id} in {wait_time}s")
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
+        
+        return None
+    
     async def _forward_messages_batch(
         self,
         messages: List[Message],
@@ -87,8 +129,7 @@ class Forwarder:
     ) -> List[Message]:
         """Forward multiple messages to ONE destination in a SINGLE API call.
         
-        This is 10-100x more efficient than forwarding one-by-one.
-        Telegram allows up to 100 messages per forward request.
+        If batch forwarding fails with server errors, falls back to one-by-one.
         
         Args:
             messages: List of messages to forward
@@ -121,6 +162,69 @@ class Forwarder:
             
         except errors.PeerFloodError:
             raise AccountLimitedError("Account limited. Check @SpamBot on Telegram.")
+        
+        except Exception as e:
+            # Check if this is a server-side error that warrants fallback
+            error_name = type(e).__name__
+            if 'Worker' in error_name or 'Busy' in error_name or 'Retry' in error_name or 'timeout' in str(e).lower():
+                self.logger.warning(f"Batch forward failed ({error_name}), falling back to one-by-one...")
+                return await self._forward_one_by_one(messages, dest_id, drop_author)
+            else:
+                # Re-raise other errors
+                raise
+    
+    async def _forward_one_by_one(
+        self,
+        messages: List[Message],
+        dest_id: int,
+        drop_author: bool = False
+    ) -> List[Message]:
+        """Forward messages one by one (fallback for when batch fails).
+        
+        Slower but more reliable when Telegram servers are busy.
+        
+        Args:
+            messages: List of messages to forward
+            dest_id: Destination chat ID
+            drop_author: Remove "Forwarded from" header
+            
+        Returns:
+            List of successfully forwarded messages
+        """
+        results = []
+        
+        for i, message in enumerate(messages):
+            try:
+                result = await self._forward_single_message(message, dest_id, drop_author)
+                if result:
+                    results.append(result)
+                
+                # Progress indicator for one-by-one mode
+                if (i + 1) % 10 == 0:
+                    self.logger.verbose(f"  One-by-one progress: {i + 1}/{len(messages)}")
+                
+                # Small delay between messages to avoid overwhelming Telegram
+                await asyncio.sleep(0.3)
+                
+            except errors.FloodWaitError as e:
+                await handle_long_flood_wait(e.seconds, self.logger)
+                # Retry this message
+                try:
+                    result = await self._forward_single_message(message, dest_id, drop_author)
+                    if result:
+                        results.append(result)
+                except Exception:
+                    self.logger.warning(f"Failed to forward msg {message.id} after flood wait")
+                    
+            except errors.PeerFloodError:
+                raise AccountLimitedError("Account limited. Check @SpamBot on Telegram.")
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to forward msg {message.id}: {e}")
+                # Continue with next message
+        
+        self.logger.verbose(f"  One-by-one complete: {len(results)}/{len(messages)} succeeded")
+        return results
     
     async def forward_to_destinations(
         self,
@@ -147,13 +251,36 @@ class Forwarder:
         if not messages:
             return result
         
+        msg_ids = {m.id for m in messages}
+        
         # Forward to each destination (batched per destination)
         for dest_id in dest_ids:
             try:
-                await self._forward_messages_batch(messages, dest_id, drop_author)
-                for msg in messages:
-                    result.success.append((msg.id, dest_id))
-                self.logger.verbose(f"Forwarded {len(messages)} msgs to {dest_id}")
+                forwarded = await self._forward_messages_batch(messages, dest_id, drop_author)
+                
+                # Track which messages succeeded
+                forwarded_ids = set()
+                for fwd in forwarded:
+                    if fwd and hasattr(fwd, 'fwd_from') and fwd.fwd_from:
+                        # The original message ID is in fwd_from for forwarded messages
+                        # But when using drop_author, we need to match by position
+                        pass
+                    forwarded_ids.add(fwd.id if fwd else None)
+                
+                # If we got back the same number of messages, all succeeded
+                if len(forwarded) == len(messages):
+                    for msg in messages:
+                        result.success.append((msg.id, dest_id))
+                    self.logger.verbose(f"Forwarded {len(messages)} msgs to {dest_id}")
+                else:
+                    # Partial success (from one-by-one fallback)
+                    # We can't easily track which exact messages failed, so count them
+                    for i, msg in enumerate(messages):
+                        if i < len(forwarded) and forwarded[i]:
+                            result.success.append((msg.id, dest_id))
+                        else:
+                            result.failed.append((msg.id, dest_id, "Failed in fallback mode"))
+                    self.logger.verbose(f"Forwarded {len(forwarded)}/{len(messages)} msgs to {dest_id}")
                 
                 # Small delay between destinations to avoid rate limits
                 if len(dest_ids) > 1:
