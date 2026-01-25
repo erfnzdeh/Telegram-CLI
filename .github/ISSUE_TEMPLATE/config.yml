@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Telegram API Documentation
+    url: https://core.telegram.org/api
+    about: Official Telegram API documentation
+  - name: Telethon Documentation
+    url: https://docs.telethon.dev/
+    about: Telethon library documentation

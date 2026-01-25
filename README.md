@@ -17,7 +17,7 @@ A command-line tool for automating Telegram message forwarding using Telethon.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/Telegram-CLI.git
+git clone https://github.com/erfnzdeh/Telegram-CLI.git
 cd Telegram-CLI
 
 # Install dependencies
