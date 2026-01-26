@@ -13,6 +13,40 @@ A command-line tool for automating Telegram message forwarding using Telethon.
 - **Fault Tolerant**: Automatic checkpointing, graceful shutdown, flood wait handling
 - **Progress Tracking**: Visual progress bars and job status
 
+## Architecture
+
+```mermaid
+flowchart TD
+    CLI[CLI Interface] --> Auth[Authentication]
+    CLI --> Config[Config Management]
+    CLI --> Forward[Forwarding Engine]
+    CLI --> State[State Manager]
+    CLI --> Logger[Logger]
+    
+    Auth --> TelegramClient[Telethon Client]
+    Config --> SessionFile[Session Storage]
+    State --> ProgressDB[Progress JSON]
+    Logger --> LogFile[Log Files]
+    
+    Forward --> BatchForward[Batch Forward]
+    Forward --> RealtimeForward[Real-time Forward]
+    Forward --> MultiDest[Multi-Destination]
+    Forward --> DeleteAfter[Delete After Forward]
+    Forward --> DropAuthor[--drop-author Flag]
+    
+    BatchForward --> iter_messages[iter_messages]
+    RealtimeForward --> NewMessageEvent[events.NewMessage]
+    DeleteAfter --> AdminCheck[Check Admin/Private]
+    
+    Forward --> ErrorHandler[Error Handler]
+    Forward --> Utils[Utils]
+    Utils --> CountEstimate[Count Estimation]
+    Utils --> ChatValidation[Chat Validation]
+    ErrorHandler --> RetryLogic[Retry with Backoff]
+    ErrorHandler --> FloodWait[FloodWait Handler]
+    ErrorHandler --> Checkpointing[Auto Checkpoint]
+```
+
 ## Installation
 
 ```bash
