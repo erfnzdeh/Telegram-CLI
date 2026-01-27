@@ -334,9 +334,22 @@ class Forwarder:
                     result.failed.append((msg.id, dest_id, str(e)))
                 self.logger.error(f"Failed forwarding to {dest_id}: {e}")
         
-        # Delete from source only if ALL destinations succeeded for these messages
-        if delete_after and not result.failed:
-            await self._safe_delete_batch(messages, source_id)
+        # Delete successfully forwarded messages from source
+        if delete_after:
+            # Find messages that succeeded for ALL destinations
+            msg_success_count = {}
+            for msg_id, dest_id in result.success:
+                msg_success_count[msg_id] = msg_success_count.get(msg_id, 0) + 1
+            
+            # Only delete messages that succeeded for all destinations
+            msgs_to_delete = [
+                msg for msg in messages 
+                if msg_success_count.get(msg.id, 0) == len(dest_ids)
+            ]
+            
+            if msgs_to_delete:
+                await self._safe_delete_batch(msgs_to_delete, source_id)
+                self.logger.verbose(f"Deleted {len(msgs_to_delete)}/{len(messages)} messages from source")
         
         return result
     
@@ -353,12 +366,23 @@ class Forwarder:
         try:
             msg_ids = [m.id for m in messages]
             target = chat_id or messages[0].chat_id
-            await self.client.delete_messages(target, msg_ids, revoke=True)
-            self.logger.verbose(f"Deleted {len(messages)} messages from source")
+            
+            self.logger.debug(f"Attempting to delete {len(msg_ids)} messages from {target}")
+            
+            # For private chats, we can only delete our own messages for both parties
+            # For channels/groups where we're admin, we can delete any message
+            result = await self.client.delete_messages(target, msg_ids, revoke=True)
+            
+            # result is an AffectedMessages object with pts_count
+            deleted_count = getattr(result, 'pts_count', len(msg_ids))
+            self.logger.verbose(f"Deleted {deleted_count} messages from source")
+            
         except errors.ChatAdminRequiredError:
             self.logger.warning("Cannot delete: admin rights required")
+        except errors.MessageDeleteForbiddenError:
+            self.logger.warning("Cannot delete: message deletion forbidden (not your message or too old)")
         except Exception as e:
-            self.logger.warning(f"Failed to delete messages: {e}")
+            self.logger.warning(f"Failed to delete messages: {type(e).__name__}: {e}")
     
     async def forward_all(
         self,
