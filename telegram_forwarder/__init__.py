@@ -7,6 +7,7 @@ from .logger import ForwarderLogger, get_logger
 from .state import StateManager, JobType, JobStatus, get_state_manager
 from .client import ClientWrapper, create_client, get_client
 from .forwarder import Forwarder, ForwardResult, test_permissions
+from .daemon import DaemonManager, get_daemon_manager
 from .errors import (
     ForwarderError,
     AccountLimitedError,
@@ -54,6 +55,9 @@ __all__ = [
     "Forwarder",
     "ForwardResult",
     "test_permissions",
+    # Daemon
+    "DaemonManager",
+    "get_daemon_manager",
     # Errors
     "ForwarderError",
     "AccountLimitedError",

@@ -9,6 +9,7 @@ A command-line tool for automating Telegram message forwarding using Telethon.
 - **Drop Author**: Remove "Forwarded from" header (appears as original message)
 - **Delete After Forward**: Delete messages from source after forwarding (requires admin)
 - **Real-time Forwarding**: Forward new messages as they arrive
+- **Daemon Mode**: Run multiple forwarding jobs in background with `--daemon`
 - **Resume Capability**: Continue interrupted batch operations
 - **Fault Tolerant**: Automatic checkpointing, graceful shutdown, flood wait handling
 - **Progress Tracking**: Visual progress bars and job status
@@ -178,6 +179,9 @@ python -m telegram_forwarder status
 | `forward-all` | Forward all messages in batches |
 | `resume` | Resume an interrupted operation |
 | `status` | Show job history and progress |
+| `list` | List running background daemons |
+| `kill` | Kill a background daemon by PID |
+| `logs` | View daemon logs |
 
 ### Global Flags
 
@@ -198,6 +202,76 @@ python -m telegram_forwarder status
 | `--dry-run` | Preview without executing |
 | `--count` | Number of messages (forward-last) |
 | `--batch-size` | Messages per batch (max 100) |
+| `--daemon` | Run in background (daemon mode) |
+
+## Daemon Mode (Background Processing)
+
+Run forwarding operations in the background. You can run multiple daemons simultaneously.
+
+### Start a Daemon
+
+```bash
+# Run any forward command with --daemon
+python -m telegram_forwarder forward-all -s -100123456 -d -100789012 --daemon
+python -m telegram_forwarder forward-live -s -100123456 -d -100789012 --daemon
+```
+
+Output:
+```
+Starting daemon...
+PID: 12345
+Logs: telegram-forwarder logs 12345
+Kill: telegram-forwarder kill 12345
+List: telegram-forwarder list
+```
+
+### List Running Daemons
+
+```bash
+python -m telegram_forwarder list
+```
+
+Output:
+```
+Running daemons (2):
+----------------------------------------------------------------------
+     PID  Command               Source        Started
+----------------------------------------------------------------------
+   12345  forward-all         -100123456  2026-02-02T14:30:00
+   12346  forward-live        -100789012  2026-02-02T15:00:00
+----------------------------------------------------------------------
+Kill with: telegram-forwarder kill <PID>
+View logs: telegram-forwarder logs <PID>
+```
+
+### Kill a Daemon
+
+```bash
+# Kill specific daemon by PID
+python -m telegram_forwarder kill 12345
+
+# Force kill (SIGKILL)
+python -m telegram_forwarder kill 12345 -f
+
+# Kill all running daemons
+python -m telegram_forwarder kill --all
+```
+
+### View Daemon Logs
+
+```bash
+# View logs for specific PID
+python -m telegram_forwarder logs 12345
+
+# View most recent daemon logs
+python -m telegram_forwarder logs
+
+# Follow logs in real-time (like tail -f)
+python -m telegram_forwarder logs 12345 -f
+
+# Show last 100 lines
+python -m telegram_forwarder logs -n 100
+```
 
 ## Configuration
 
@@ -206,7 +280,8 @@ Configuration is stored in `~/.telegram-forwarder/`:
 - `config.json` - API credentials and settings
 - `session.session` - Telegram session file
 - `jobs.json` - Job history and progress
-- `logs/` - Log files (one per day)
+- `daemons.json` - Running daemon processes
+- `logs/` - Log files (per daemon and daily)
 
 ### Environment Variables
 

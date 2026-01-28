@@ -2,7 +2,9 @@
 
 import argparse
 import asyncio
+import os
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -11,6 +13,7 @@ from .logger import ForwarderLogger, get_logger
 from .state import StateManager, JobType, JobStatus, get_state_manager
 from .client import ClientWrapper, get_client
 from .forwarder import Forwarder, test_permissions
+from .daemon import DaemonManager, get_daemon_manager
 from .errors import (
     ForwarderError,
     AccountLimitedError,
@@ -161,6 +164,48 @@ Examples:
     # Status command
     subparsers.add_parser('status', help='Show progress of ongoing/interrupted jobs')
     
+    # Daemon list command
+    subparsers.add_parser('list', help='List running background daemons')
+    
+    # Kill command (for daemon mode)
+    kill_parser = subparsers.add_parser('kill', help='Kill a background daemon by PID')
+    kill_parser.add_argument(
+        'pid',
+        nargs='?',
+        type=int,
+        help='Process ID to kill (kills all if not specified)'
+    )
+    kill_parser.add_argument(
+        '-f', '--force',
+        action='store_true',
+        help='Force kill (SIGKILL instead of SIGTERM)'
+    )
+    kill_parser.add_argument(
+        '--all',
+        action='store_true',
+        help='Kill all running daemons'
+    )
+    
+    # Logs command
+    logs_parser = subparsers.add_parser('logs', help='View daemon logs')
+    logs_parser.add_argument(
+        'pid',
+        nargs='?',
+        type=int,
+        help='Process ID to view logs for (shows latest if not specified)'
+    )
+    logs_parser.add_argument(
+        '-n', '--lines',
+        type=int,
+        default=50,
+        help='Number of lines to show (default: 50)'
+    )
+    logs_parser.add_argument(
+        '-f', '--follow',
+        action='store_true',
+        help='Follow log output (like tail -f)'
+    )
+    
     return parser
 
 
@@ -191,6 +236,11 @@ def _add_forward_args(parser: argparse.ArgumentParser):
         '--dry-run',
         action='store_true',
         help='Preview without executing'
+    )
+    parser.add_argument(
+        '--daemon',
+        action='store_true',
+        help='Run in background (daemon mode). Stop with: telegram-forwarder stop'
     )
 
 
@@ -721,6 +771,108 @@ async def cmd_status(
     return 0
 
 
+def cmd_list_daemons(config_manager: ConfigManager) -> int:
+    """Handle list command - show running daemons."""
+    daemon_manager = get_daemon_manager(config_manager.config_dir)
+    
+    processes = daemon_manager.list_running()
+    
+    if not processes:
+        print("No running daemons")
+        return 0
+    
+    print(f"Running daemons ({len(processes)}):")
+    print("-" * 70)
+    print(f"{'PID':>8}  {'Command':<20}  {'Source':>12}  {'Started'}")
+    print("-" * 70)
+    
+    for proc in processes:
+        source = str(proc.source) if proc.source else "-"
+        started = proc.started_at[:19] if proc.started_at else "-"
+        print(f"{proc.pid:>8}  {proc.command:<20}  {source:>12}  {started}")
+    
+    print("-" * 70)
+    print(f"Kill with: telegram-forwarder kill <PID>")
+    print(f"View logs: telegram-forwarder logs <PID>")
+    
+    return 0
+
+
+def cmd_kill(args, config_manager: ConfigManager) -> int:
+    """Handle kill command - stop daemons."""
+    daemon_manager = get_daemon_manager(config_manager.config_dir)
+    
+    # Kill all if --all flag or no PID specified
+    if args.all or (args.pid is None):
+        processes = daemon_manager.list_running()
+        
+        if not processes:
+            print("No running daemons to kill")
+            return 0
+        
+        if args.pid is None and not args.all:
+            # No PID and no --all, show list instead
+            print(f"Running daemons ({len(processes)}):")
+            for proc in processes:
+                print(f"  PID {proc.pid}: {proc.command}")
+            print()
+            print("Specify a PID or use --all to kill all:")
+            print("  telegram-forwarder kill <PID>")
+            print("  telegram-forwarder kill --all")
+            return 0
+        
+        killed, failed = daemon_manager.kill_all()
+        print(f"Killed {killed} daemons" + (f", {failed} failed" if failed else ""))
+        return 0 if failed == 0 else 1
+    
+    # Kill specific PID
+    success, message = daemon_manager.kill(args.pid, force=args.force)
+    print(message)
+    return 0 if success else 1
+
+
+def cmd_logs(args, config_manager: ConfigManager) -> int:
+    """Handle logs command - view daemon logs."""
+    daemon_manager = get_daemon_manager(config_manager.config_dir)
+    
+    # If PID specified, use that log file
+    if args.pid:
+        log_file = daemon_manager.get_log_file(args.pid)
+        if not log_file.exists():
+            print(f"No logs found for PID {args.pid}")
+            return 1
+    else:
+        # Find the most recent log file
+        log_files = sorted(daemon_manager.logs_dir.glob("daemon_*.log"), 
+                          key=lambda f: f.stat().st_mtime, reverse=True)
+        if not log_files:
+            print("No daemon logs found")
+            return 0
+        log_file = log_files[0]
+        print(f"Showing logs from: {log_file.name}")
+        print("-" * 50)
+    
+    if args.follow:
+        # Follow mode - like tail -f
+        import subprocess
+        try:
+            subprocess.run(['tail', '-f', str(log_file)])
+        except KeyboardInterrupt:
+            pass
+        return 0
+    else:
+        # Show last N lines
+        if not log_file.exists():
+            print("Log file not found")
+            return 1
+        
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            for line in lines[-args.lines:]:
+                print(line.rstrip())
+        return 0
+
+
 async def main_async(args: argparse.Namespace) -> int:
     """Async main function."""
     # Determine verbosity
@@ -764,6 +916,59 @@ def main():
     """Main entry point."""
     parser = create_parser()
     args = parser.parse_args()
+    
+    # Handle synchronous commands first
+    if args.command == 'list':
+        config_manager = get_config_manager()
+        sys.exit(cmd_list_daemons(config_manager))
+    
+    if args.command == 'kill':
+        config_manager = get_config_manager()
+        sys.exit(cmd_kill(args, config_manager))
+    
+    if args.command == 'logs':
+        config_manager = get_config_manager()
+        sys.exit(cmd_logs(args, config_manager))
+    
+    # Check for daemon mode
+    if hasattr(args, 'daemon') and args.daemon:
+        config_manager = get_config_manager()
+        daemon_manager = get_daemon_manager(config_manager.config_dir)
+        
+        # Get source/dest for tracking
+        source = None
+        dest = None
+        if hasattr(args, 'source'):
+            try:
+                source = int(args.source) if args.source else None
+            except ValueError:
+                source = None
+        if hasattr(args, 'dest'):
+            dest = []
+            for d in (args.dest or []):
+                try:
+                    dest.append(int(d))
+                except ValueError:
+                    pass
+        
+        print(f"Starting daemon...")
+        
+        # Daemonize - returns 0 in child, PID in parent
+        child_pid = daemon_manager.daemonize(
+            command=args.command,
+            source=source,
+            dest=dest
+        )
+        
+        if child_pid > 0:
+            # We're in the parent
+            print(f"PID: {child_pid}")
+            print(f"Logs: telegram-forwarder logs {child_pid}")
+            print(f"Kill: telegram-forwarder kill {child_pid}")
+            print(f"List: telegram-forwarder list")
+            sys.exit(0)
+        
+        # We're in the child - continue with normal execution
     
     try:
         exit_code = asyncio.run(main_async(args))
