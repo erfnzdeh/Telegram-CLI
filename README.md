@@ -50,13 +50,24 @@ flowchart TD
 
 ## Installation
 
+### Via pip (Recommended)
+
 ```bash
-# Clone the repository
+pip install telegram-cli
+```
+
+### Via pipx (Isolated Environment)
+
+```bash
+pipx install telegram-cli
+```
+
+### From Source
+
+```bash
 git clone https://github.com/erfnzdeh/Telegram-CLI.git
 cd Telegram-CLI
-
-# Install dependencies
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Setup
@@ -69,7 +80,7 @@ pip install -r requirements.txt
 2. Login to Telegram:
 
 ```bash
-python -m telegram_forwarder login
+telegram-cli login
 ```
 
 You'll be prompted to enter your API credentials, phone number, and verification code.
@@ -79,7 +90,7 @@ You'll be prompted to enter your API credentials, phone number, and verification
 ### List Available Chats
 
 ```bash
-python -m telegram_forwarder list-chats
+telegram-cli list-chats
 ```
 
 Output:
@@ -92,20 +103,20 @@ Output:
 ### Test Permissions
 
 ```bash
-python -m telegram_forwarder test -s -100123456 -d -100789012 --delete
+telegram-cli test -s -100123456 -d -100789012 --delete
 ```
 
 ### Forward Last N Messages
 
 ```bash
 # Basic forward (with "Forwarded from" header)
-python -m telegram_forwarder forward-last -s -100123456 -d -100789012 --count 50
+telegram-cli forward-last -s -100123456 -d -100789012 --count 50
 
 # Without "Forwarded from" header
-python -m telegram_forwarder forward-last -s -100123456 -d -100789012 --count 50 --drop-author
+telegram-cli forward-last -s -100123456 -d -100789012 --count 50 --drop-author
 
 # Forward to multiple destinations
-python -m telegram_forwarder forward-last \
+telegram-cli forward-last \
     -s -100123456 \
     -d -100789012 \
     -d -100789013 \
@@ -113,13 +124,13 @@ python -m telegram_forwarder forward-last \
     --drop-author
 
 # Forward and delete from source
-python -m telegram_forwarder forward-last -s -100123456 -d -100789012 --count 50 --delete
+telegram-cli forward-last -s -100123456 -d -100789012 --count 50 --delete
 ```
 
 ### Forward All Messages
 
 ```bash
-python -m telegram_forwarder forward-all \
+telegram-cli forward-all \
     -s -100123456 \
     -d -100789012 \
     --drop-author
@@ -142,7 +153,7 @@ Complete: 12500 forwarded, 150 skipped, 0 failed
 ### Real-time Forwarding
 
 ```bash
-python -m telegram_forwarder forward-live \
+telegram-cli forward-live \
     -s -100123456 \
     -d -100789012 \
     --drop-author
@@ -154,16 +165,16 @@ Press `Ctrl+C` to stop.
 
 ```bash
 # List resumable jobs
-python -m telegram_forwarder resume
+telegram-cli resume
 
 # Resume specific job
-python -m telegram_forwarder resume abc12345
+telegram-cli resume abc12345
 ```
 
 ### Check Job Status
 
 ```bash
-python -m telegram_forwarder status
+telegram-cli status
 ```
 
 ## Command Reference
@@ -212,23 +223,23 @@ Run forwarding operations in the background. You can run multiple daemons simult
 
 ```bash
 # Run any forward command with --daemon
-python -m telegram_forwarder forward-all -s -100123456 -d -100789012 --daemon
-python -m telegram_forwarder forward-live -s -100123456 -d -100789012 --daemon
+telegram-cli forward-all -s -100123456 -d -100789012 --daemon
+telegram-cli forward-live -s -100123456 -d -100789012 --daemon
 ```
 
 Output:
 ```
 Starting daemon...
 PID: 12345
-Logs: telegram-forwarder logs 12345
-Kill: telegram-forwarder kill 12345
-List: telegram-forwarder list
+Logs: telegram-cli logs 12345
+Kill: telegram-cli kill 12345
+List: telegram-cli list
 ```
 
 ### List Running Daemons
 
 ```bash
-python -m telegram_forwarder list
+telegram-cli list
 ```
 
 Output:
@@ -240,42 +251,42 @@ Running daemons (2):
    12345  forward-all         -100123456  2026-02-02T14:30:00
    12346  forward-live        -100789012  2026-02-02T15:00:00
 ----------------------------------------------------------------------
-Kill with: telegram-forwarder kill <PID>
-View logs: telegram-forwarder logs <PID>
+Kill with: telegram-cli kill <PID>
+View logs: telegram-cli logs <PID>
 ```
 
 ### Kill a Daemon
 
 ```bash
 # Kill specific daemon by PID
-python -m telegram_forwarder kill 12345
+telegram-cli kill 12345
 
 # Force kill (SIGKILL)
-python -m telegram_forwarder kill 12345 -f
+telegram-cli kill 12345 -f
 
 # Kill all running daemons
-python -m telegram_forwarder kill --all
+telegram-cli kill --all
 ```
 
 ### View Daemon Logs
 
 ```bash
 # View logs for specific PID
-python -m telegram_forwarder logs 12345
+telegram-cli logs 12345
 
 # View most recent daemon logs
-python -m telegram_forwarder logs
+telegram-cli logs
 
 # Follow logs in real-time (like tail -f)
-python -m telegram_forwarder logs 12345 -f
+telegram-cli logs 12345 -f
 
 # Show last 100 lines
-python -m telegram_forwarder logs -n 100
+telegram-cli logs -n 100
 ```
 
 ## Configuration
 
-Configuration is stored in `~/.telegram-forwarder/`:
+Configuration is stored in `~/.telegram-cli/`:
 
 - `config.json` - API credentials and settings
 - `session.session` - Telegram session file
