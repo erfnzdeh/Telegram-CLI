@@ -50,20 +50,6 @@ flowchart TD
 
 ## Installation
 
-### Via pip (Recommended)
-
-```bash
-pip install telegram-cli
-```
-
-### Via pipx (Isolated Environment)
-
-```bash
-pipx install telegram-cli
-```
-
-### From Source
-
 ```bash
 git clone https://github.com/erfnzdeh/Telegram-CLI.git
 cd Telegram-CLI
