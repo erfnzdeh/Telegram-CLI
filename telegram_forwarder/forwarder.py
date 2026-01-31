@@ -605,6 +605,216 @@ class Forwarder:
             self.client.remove_event_handler(self._live_handler)
             self._live_handler = None
     
+    async def delete_last(
+        self,
+        chat_id: int,
+        count: int,
+        dry_run: bool = False
+    ) -> Tuple[int, int]:
+        """Delete last N messages from a chat.
+        
+        Args:
+            chat_id: Chat ID to delete from
+            count: Number of messages to delete
+            dry_run: If True, don't actually delete
+            
+        Returns:
+            Tuple of (deleted, failed)
+        """
+        deleted = 0
+        failed = 0
+        
+        self.logger.info(f"{'[DRY RUN] ' if dry_run else ''}Deleting {count} messages from {chat_id}")
+        
+        # Collect messages
+        messages = []
+        async for msg in self.client.iter_messages(chat_id, limit=count):
+            messages.append(msg)
+        
+        if not messages:
+            self.logger.warning("No messages found")
+            return 0, 0
+        
+        self.logger.info(f"Found {len(messages)} messages to delete")
+        
+        if dry_run:
+            for msg in messages:
+                self.logger.verbose(f"Would delete: {msg.id}")
+            return len(messages), 0
+        
+        # Delete in batches
+        batch_size = self.MAX_BATCH_SIZE
+        for i in range(0, len(messages), batch_size):
+            if self.shutdown and self.shutdown.shutdown_requested:
+                self.logger.info("Shutdown requested, stopping...")
+                break
+            
+            batch = messages[i:i + batch_size]
+            msg_ids = [m.id for m in batch]
+            
+            try:
+                result = await self.client.delete_messages(chat_id, msg_ids, revoke=True)
+                batch_deleted = getattr(result, 'pts_count', len(msg_ids))
+                deleted += batch_deleted
+                self.logger.verbose(f"Deleted batch: {batch_deleted} messages")
+            except errors.ChatAdminRequiredError:
+                self.logger.error("Admin rights required to delete messages")
+                failed += len(batch)
+            except errors.MessageDeleteForbiddenError:
+                self.logger.warning(f"Cannot delete some messages (not yours or too old)")
+                failed += len(batch)
+            except Exception as e:
+                self.logger.error(f"Delete failed: {type(e).__name__}: {e}")
+                failed += len(batch)
+            
+            # Small delay between batches
+            if i + batch_size < len(messages):
+                await asyncio.sleep(0.5)
+        
+        return deleted, failed
+    
+    async def delete_all(
+        self,
+        chat_id: int,
+        batch_size: int = 100,
+        dry_run: bool = False
+    ) -> Tuple[int, int]:
+        """Delete all messages from a chat.
+        
+        Args:
+            chat_id: Chat ID to delete from
+            batch_size: Messages per batch (max 100)
+            dry_run: If True, don't actually delete
+            
+        Returns:
+            Tuple of (deleted, failed)
+        """
+        batch_size = min(batch_size, self.MAX_BATCH_SIZE)
+        deleted = 0
+        failed = 0
+        
+        self.logger.info(f"{'[DRY RUN] ' if dry_run else ''}Deleting all messages from {chat_id}")
+        
+        # Get total count for progress
+        total = await estimate_message_count(self.client, chat_id)
+        self.logger.info(f"Total messages: {format_estimate(total)}")
+        
+        batch = []
+        processed = 0
+        
+        async for msg in self.client.iter_messages(chat_id):
+            if self.shutdown and self.shutdown.shutdown_requested:
+                self.logger.info("Shutdown requested, stopping...")
+                break
+            
+            batch.append(msg)
+            
+            if len(batch) >= batch_size:
+                if dry_run:
+                    processed += len(batch)
+                    self.logger.verbose(f"Would delete: {len(batch)} messages")
+                else:
+                    msg_ids = [m.id for m in batch]
+                    try:
+                        result = await self.client.delete_messages(chat_id, msg_ids, revoke=True)
+                        batch_deleted = getattr(result, 'pts_count', len(msg_ids))
+                        deleted += batch_deleted
+                        processed += len(batch)
+                    except errors.ChatAdminRequiredError:
+                        self.logger.error("Admin rights required to delete messages")
+                        failed += len(batch)
+                    except errors.MessageDeleteForbiddenError:
+                        self.logger.warning(f"Cannot delete some messages (not yours or too old)")
+                        failed += len(batch)
+                    except Exception as e:
+                        self.logger.error(f"Delete failed: {type(e).__name__}: {e}")
+                        failed += len(batch)
+                
+                # Progress update
+                if total > 0:
+                    pct = (processed / total) * 100
+                    self.logger.info(f"Progress: {processed}/{total} ({pct:.1f}%)")
+                
+                batch = []
+                await asyncio.sleep(self.delay_between_batches)
+        
+        # Process remaining
+        if batch:
+            if dry_run:
+                processed += len(batch)
+            else:
+                msg_ids = [m.id for m in batch]
+                try:
+                    result = await self.client.delete_messages(chat_id, msg_ids, revoke=True)
+                    batch_deleted = getattr(result, 'pts_count', len(msg_ids))
+                    deleted += batch_deleted
+                except Exception as e:
+                    self.logger.error(f"Delete failed: {type(e).__name__}: {e}")
+                    failed += len(batch)
+        
+        if dry_run:
+            return processed, 0
+        
+        return deleted, failed
+    
+    async def verify_delete_operation(
+        self,
+        chat_id: int,
+        count: Optional[int] = None,
+        skip_confirm: bool = False,
+        dry_run: bool = False
+    ) -> bool:
+        """Verify and display delete operation details before starting.
+        
+        Args:
+            chat_id: Chat ID to delete from
+            count: Number of messages (None for all)
+            skip_confirm: Skip confirmation prompt
+            dry_run: Whether this is a dry run
+            
+        Returns:
+            True if operation should proceed, False otherwise
+        """
+        # Get chat info
+        try:
+            chat_info = await self.client.get_entity(chat_id)
+            chat_name = getattr(chat_info, 'title', None) or getattr(chat_info, 'first_name', str(chat_id))
+        except Exception:
+            chat_name = str(chat_id)
+        
+        # Estimate count
+        if count:
+            total = count
+        else:
+            total = await estimate_message_count(self.client, chat_id)
+        
+        self.logger.info(f"Chat: {chat_id} ({chat_name})")
+        self.logger.info(f"Messages to delete: {format_estimate(total) if not count else count}")
+        if dry_run:
+            self.logger.info("Mode: DRY RUN (no actual deletion)")
+        
+        # Check delete permission
+        me = await self.client.get_me()
+        can_delete, delete_reason = await check_delete_permission(self.client, chat_id, me.id)
+        if can_delete:
+            self.logger.info(f"Permission: {delete_reason}")
+        else:
+            self.logger.error(f"Cannot delete: {delete_reason}")
+            return False
+        
+        if not skip_confirm and not dry_run:
+            try:
+                self.logger.warning("WARNING: This action cannot be undone!")
+                confirm = input("\nProceed with deletion? [y/N]: ").strip().lower()
+                if confirm != 'y':
+                    self.logger.info("Aborted by user")
+                    return False
+            except EOFError:
+                self.logger.info("Aborted (no input)")
+                return False
+        
+        return True
+    
     async def verify_operation(
         self,
         source_id: int,

@@ -147,6 +147,19 @@ telegram-cli forward-live \
 
 Press `Ctrl+C` to stop.
 
+### Delete Messages
+
+```bash
+# Delete last 50 messages from a chat
+telegram-cli delete-last -c -100123456 --count 50
+
+# Delete all messages from a chat
+telegram-cli delete-all -c -100123456
+
+# Preview without deleting (dry run)
+telegram-cli delete-all -c -100123456 --dry-run
+```
+
 ### Resume Interrupted Jobs
 
 ```bash
@@ -174,6 +187,8 @@ telegram-cli status
 | `forward-last` | Forward last X messages |
 | `forward-live` | Start real-time forwarding |
 | `forward-all` | Forward all messages in batches |
+| `delete-last` | Delete last X messages from a chat |
+| `delete-all` | Delete all messages from a chat |
 | `resume` | Resume an interrupted operation |
 | `status` | Show job history and progress |
 | `list` | List running background daemons |
@@ -200,6 +215,15 @@ telegram-cli status
 | `--count` | Number of messages (forward-last) |
 | `--batch-size` | Messages per batch (max 100) |
 | `--daemon` | Run in background (daemon mode) |
+
+### Delete Flags
+
+| Flag | Description |
+|------|-------------|
+| `-c, --chat` | Chat ID or @username to delete from |
+| `--count` | Number of messages (delete-last) |
+| `--batch-size` | Messages per batch (max 100) |
+| `--dry-run` | Preview without executing |
 
 ## Daemon Mode (Background Processing)
 

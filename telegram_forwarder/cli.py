@@ -153,6 +153,32 @@ Examples:
         help='Messages per batch (default: 100, max: 100)'
     )
     
+    # Delete-last command
+    delete_last_parser = subparsers.add_parser(
+        'delete-last',
+        help='Delete last X messages from a chat'
+    )
+    _add_delete_args(delete_last_parser)
+    delete_last_parser.add_argument(
+        '--count',
+        type=int,
+        required=True,
+        help='Number of messages to delete'
+    )
+    
+    # Delete-all command
+    delete_all_parser = subparsers.add_parser(
+        'delete-all',
+        help='Delete all messages from a chat'
+    )
+    _add_delete_args(delete_all_parser)
+    delete_all_parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=100,
+        help='Messages per batch (default: 100, max: 100)'
+    )
+    
     # Resume command
     resume_parser = subparsers.add_parser('resume', help='Resume an interrupted batch operation')
     resume_parser.add_argument(
@@ -221,6 +247,20 @@ def _add_forward_args(parser: argparse.ArgumentParser):
         action='append',
         required=True,
         help='Destination chat ID (can be repeated for multiple destinations)'
+    )
+
+
+def _add_delete_args(parser: argparse.ArgumentParser):
+    """Add common delete arguments to a parser."""
+    parser.add_argument(
+        '-c', '--chat',
+        required=True,
+        help='Chat ID or username to delete messages from'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Preview without executing'
     )
     parser.add_argument(
         '--drop-author',
@@ -638,6 +678,133 @@ async def cmd_forward_live(
         return 1
 
 
+async def cmd_delete_last(
+    args,
+    config_manager: ConfigManager,
+    logger: ForwarderLogger,
+    state_manager: StateManager
+):
+    """Handle delete-last command."""
+    wrapper = ClientWrapper(config_manager, logger)
+    
+    try:
+        is_authorized = await wrapper.connect()
+        if not is_authorized:
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
+            return 1
+        
+        # Parse chat ID
+        chat_id = validate_chat_id(args.chat)
+        
+        # Create shutdown handler
+        shutdown = create_shutdown_handler(state_manager, logger)
+        
+        try:
+            # Create forwarder
+            forwarder = Forwarder(
+                client=wrapper.client,
+                logger=logger,
+                state=state_manager,
+                shutdown=shutdown,
+            )
+            
+            # Verify delete operation
+            proceed = await forwarder.verify_delete_operation(
+                chat_id=chat_id,
+                count=args.count,
+                skip_confirm=args.yes,
+                dry_run=args.dry_run,
+            )
+            if not proceed:
+                return 1
+            
+            # Execute
+            deleted, failed = await forwarder.delete_last(
+                chat_id=chat_id,
+                count=args.count,
+                dry_run=args.dry_run,
+            )
+            
+            logger.success(f"Complete: {deleted} deleted, {failed} failed")
+            await wrapper.disconnect()
+            return 0 if failed == 0 else 1
+            
+        finally:
+            shutdown.cleanup()
+        
+    except AccountLimitedError as e:
+        logger.error(str(e))
+        return 1
+    except Exception as e:
+        logger.error(f"Delete failed: {e}")
+        return 1
+
+
+async def cmd_delete_all(
+    args,
+    config_manager: ConfigManager,
+    logger: ForwarderLogger,
+    state_manager: StateManager
+):
+    """Handle delete-all command."""
+    wrapper = ClientWrapper(config_manager, logger)
+    
+    try:
+        is_authorized = await wrapper.connect()
+        if not is_authorized:
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
+            return 1
+        
+        # Parse chat ID
+        chat_id = validate_chat_id(args.chat)
+        
+        # Create shutdown handler
+        shutdown = create_shutdown_handler(state_manager, logger)
+        
+        try:
+            # Create forwarder
+            forwarder = Forwarder(
+                client=wrapper.client,
+                logger=logger,
+                state=state_manager,
+                shutdown=shutdown,
+            )
+            
+            # Verify delete operation
+            proceed = await forwarder.verify_delete_operation(
+                chat_id=chat_id,
+                count=None,  # All messages
+                skip_confirm=args.yes,
+                dry_run=args.dry_run,
+            )
+            if not proceed:
+                return 1
+            
+            # Execute
+            deleted, failed = await forwarder.delete_all(
+                chat_id=chat_id,
+                batch_size=args.batch_size,
+                dry_run=args.dry_run,
+            )
+            
+            if shutdown.shutdown_requested:
+                logger.info("Interrupted. Run the command again to continue.")
+            
+            logger.success(f"Complete: {deleted} deleted, {failed} failed")
+            await wrapper.disconnect()
+            return 0 if failed == 0 else 1
+            
+        finally:
+            shutdown.cleanup()
+        
+    except AccountLimitedError as e:
+        logger.error(str(e))
+        return 1
+    except Exception as e:
+        logger.error(f"Delete failed: {e}")
+        return 1
+
+
 async def cmd_resume(
     args,
     config_manager: ConfigManager,
@@ -895,6 +1062,8 @@ async def main_async(args: argparse.Namespace) -> int:
         'forward-last': lambda: cmd_forward_last(args, config_manager, logger, state_manager),
         'forward-all': lambda: cmd_forward_all(args, config_manager, logger, state_manager),
         'forward-live': lambda: cmd_forward_live(args, config_manager, logger, state_manager),
+        'delete-last': lambda: cmd_delete_last(args, config_manager, logger, state_manager),
+        'delete-all': lambda: cmd_delete_all(args, config_manager, logger, state_manager),
         'resume': lambda: cmd_resume(args, config_manager, logger, state_manager),
         'status': lambda: cmd_status(args, config_manager, logger, state_manager),
     }
