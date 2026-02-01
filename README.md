@@ -147,6 +147,46 @@ telegram-cli forward-live \
 
 Press `Ctrl+C` to stop.
 
+### Message Transforms
+
+Transform message content before forwarding. Useful for removing mentions, links, or applying custom modifications.
+
+```bash
+# List available transforms
+telegram-cli forward-live -s -100123456 -d -100789012 --list-transforms
+
+# Remove @mentions from messages
+telegram-cli forward-live \
+    -s -100123456 \
+    -d -100789012 \
+    --transform "replace_mentions"
+
+# Replace @mentions with custom text
+telegram-cli forward-live \
+    -s -100123456 \
+    -d -100789012 \
+    --transform "replace_mentions" \
+    --transform-config "replacement=[channel]"
+
+# Chain multiple transforms
+telegram-cli forward-live \
+    -s -100123456 \
+    -d -100789012 \
+    --transform "replace_mentions,remove_links,strip_formatting"
+```
+
+**Available Transforms:**
+
+| Transform | Description |
+|-----------|-------------|
+| `replace_mentions` | Replace @username mentions |
+| `remove_links` | Remove URLs |
+| `remove_hashtags` | Remove #hashtags |
+| `strip_formatting` | Clean up extra whitespace |
+| `add_prefix` | Add text at the beginning |
+| `add_suffix` | Add text at the end |
+| `regex_replace` | Custom regex replacement |
+
 ### Delete Messages
 
 ```bash
@@ -215,6 +255,9 @@ telegram-cli status
 | `--count` | Number of messages (forward-last) |
 | `--batch-size` | Messages per batch (max 100) |
 | `--daemon` | Run in background (daemon mode) |
+| `--transform` | Transform chain (forward-live only) |
+| `--transform-config` | Config for transform |
+| `--list-transforms` | List available transforms |
 
 ### Delete Flags
 

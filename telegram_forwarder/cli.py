@@ -22,6 +22,7 @@ from .errors import (
     create_shutdown_handler,
 )
 from .utils import validate_chat_id
+from .transforms import list_transforms, create_chain_from_spec
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -139,6 +140,19 @@ Examples:
         help='Start real-time forwarding of new messages'
     )
     _add_forward_args(forward_live_parser)
+    forward_live_parser.add_argument(
+        '--transform',
+        help='Transform chain to apply (e.g., "replace_mentions", "replace_mentions,strip_formatting")'
+    )
+    forward_live_parser.add_argument(
+        '--transform-config',
+        help='Config for transform (e.g., "replacement=[removed]")'
+    )
+    forward_live_parser.add_argument(
+        '--list-transforms',
+        action='store_true',
+        help='List available transforms and exit'
+    )
     
     # Forward-all command
     forward_all_parser = subparsers.add_parser(
@@ -605,12 +619,43 @@ async def cmd_forward_live(
     state_manager: StateManager
 ):
     """Handle forward-live command."""
+    # Handle --list-transforms
+    if getattr(args, 'list_transforms', False):
+        transforms = list_transforms()
+        logger.info("Available transforms:")
+        logger.info("-" * 40)
+        for name in sorted(transforms):
+            logger.info(f"  {name}")
+        logger.info("-" * 40)
+        logger.info("Usage: --transform 'replace_mentions,strip_formatting'")
+        logger.info("With config: --transform 'replace_mentions' --transform-config 'replacement=[removed]'")
+        return 0
+    
+    # Parse transform chain if provided
+    transform_chain = None
+    if getattr(args, 'transform', None):
+        try:
+            # Build spec with config if provided
+            spec = args.transform
+            if getattr(args, 'transform_config', None):
+                # Append config to the first transform
+                parts = spec.split(',')
+                if parts:
+                    parts[0] = f"{parts[0]}:{args.transform_config}"
+                    spec = ','.join(parts)
+            
+            transform_chain = create_chain_from_spec(spec)
+            logger.info(f"Transform chain: {args.transform} ({len(transform_chain)} transforms)")
+        except ValueError as e:
+            logger.error(f"Invalid transform: {e}")
+            return 1
+    
     wrapper = ClientWrapper(config_manager, logger)
     
     try:
         is_authorized = await wrapper.connect()
         if not is_authorized:
-            logger.error("Not logged in. Run 'telegram-forwarder login' first.")
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
         # Parse chat IDs
@@ -657,6 +702,7 @@ async def cmd_forward_live(
                 dest_ids=dest_ids,
                 drop_author=args.drop_author,
                 delete_after=args.delete,
+                transform_chain=transform_chain,
             )
             
             state_manager.mark_completed()

@@ -32,6 +32,12 @@ from .utils import (
     format_size,
     validate_chat_id,
 )
+from .transforms import (
+    TransformChain,
+    get_transform,
+    list_transforms,
+    create_chain_from_spec,
+)
 
 __all__ = [
     # Version
@@ -80,4 +86,9 @@ __all__ = [
     "format_duration",
     "format_size",
     "validate_chat_id",
+    # Transforms
+    "TransformChain",
+    "get_transform",
+    "list_transforms",
+    "create_chain_from_spec",
 ]

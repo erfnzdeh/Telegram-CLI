@@ -24,6 +24,7 @@ from .utils import (
     estimate_message_count,
     format_estimate,
 )
+from .transforms import TransformChain
 
 
 @dataclass
@@ -556,7 +557,8 @@ class Forwarder:
         source_id: int,
         dest_ids: List[int],
         drop_author: bool = False,
-        delete_after: bool = False
+        delete_after: bool = False,
+        transform_chain: Optional[TransformChain] = None
     ):
         """Start real-time forwarding of new messages.
         
@@ -565,9 +567,12 @@ class Forwarder:
             dest_ids: List of destination chat IDs
             drop_author: Remove "Forwarded from" header
             delete_after: Delete from source after forwarding
+            transform_chain: Optional transform chain to apply to messages
         """
         self.logger.info(f"Starting live forwarding from {source_id}")
         self.logger.info(f"Destinations: {', '.join(map(str, dest_ids))}")
+        if transform_chain:
+            self.logger.info(f"Transform: enabled ({len(transform_chain)} transforms)")
         self.logger.info("Press Ctrl+C to stop...")
         
         @self.client.on(events.NewMessage(chats=[source_id]))
@@ -580,13 +585,19 @@ class Forwarder:
                 return
             
             try:
-                # Single message, but still use batch method for consistency
-                result = await self.forward_to_destinations(
-                    [message], dest_ids, drop_author, delete_after, source_id
-                )
-                
-                if result.success:
-                    self.logger.verbose(f"Forwarded new message {message.id}")
+                # If transform is provided, send transformed message instead of forwarding
+                if transform_chain:
+                    await self._send_transformed_message(
+                        message, dest_ids, transform_chain, delete_after, source_id
+                    )
+                    self.logger.verbose(f"Sent transformed message {message.id}")
+                else:
+                    # Standard forward
+                    result = await self.forward_to_destinations(
+                        [message], dest_ids, drop_author, delete_after, source_id
+                    )
+                    if result.success:
+                        self.logger.verbose(f"Forwarded new message {message.id}")
                     
             except AccountLimitedError as e:
                 self.logger.error(f"Account limited! Stopping live forward: {e}")
@@ -598,6 +609,71 @@ class Forwarder:
         
         # Run until disconnected
         await self.client.run_until_disconnected()
+    
+    async def _send_transformed_message(
+        self,
+        message: Message,
+        dest_ids: List[int],
+        transform_chain: TransformChain,
+        delete_after: bool = False,
+        source_id: Optional[int] = None
+    ):
+        """Send a message with transformed text to destinations.
+        
+        When a transform is applied, we can't use forward_messages.
+        Instead, we send a new message with the transformed text and original media.
+        
+        Args:
+            message: Original message
+            dest_ids: Destination chat IDs
+            transform_chain: Transform chain to apply
+            delete_after: Whether to delete after sending
+            source_id: Source chat ID (for deletion)
+        """
+        # Get original text and apply transforms
+        original_text = message.text or message.message or ''
+        transformed_text = transform_chain.apply(original_text) if original_text else ''
+        
+        self.logger.debug(f"Original: {original_text[:100]}...")
+        self.logger.debug(f"Transformed: {transformed_text[:100]}...")
+        
+        success_count = 0
+        
+        for dest_id in dest_ids:
+            try:
+                if message.media:
+                    # Message has media - send with media
+                    await self.client.send_file(
+                        dest_id,
+                        message.media,
+                        caption=transformed_text,
+                        # Preserve formatting entities if possible
+                        formatting_entities=message.entities if not transform_chain else None,
+                    )
+                else:
+                    # Text-only message
+                    await self.client.send_message(
+                        dest_id,
+                        transformed_text,
+                        # Preserve formatting only if text unchanged
+                        formatting_entities=message.entities if original_text == transformed_text else None,
+                    )
+                success_count += 1
+                
+            except errors.ChatWriteForbiddenError:
+                self.logger.warning(f"Cannot write to {dest_id}")
+            except errors.ChannelPrivateError:
+                self.logger.warning(f"Channel {dest_id} is private")
+            except Exception as e:
+                self.logger.error(f"Failed to send to {dest_id}: {e}")
+            
+            # Small delay between destinations
+            if len(dest_ids) > 1:
+                await asyncio.sleep(self.delay_between_destinations)
+        
+        # Delete from source if all succeeded
+        if delete_after and success_count == len(dest_ids):
+            await self._safe_delete_batch([message], source_id)
     
     def stop_live_forward(self):
         """Stop live forwarding."""
