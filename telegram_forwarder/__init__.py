@@ -38,6 +38,13 @@ from .transforms import (
     list_transforms,
     create_chain_from_spec,
 )
+from .filters import (
+    MessageFilter,
+    create_filter_from_args,
+    parse_date,
+    parse_size,
+    parse_message_types,
+)
 
 __all__ = [
     # Version
@@ -91,4 +98,10 @@ __all__ = [
     "get_transform",
     "list_transforms",
     "create_chain_from_spec",
+    # Filters
+    "MessageFilter",
+    "create_filter_from_args",
+    "parse_date",
+    "parse_size",
+    "parse_message_types",
 ]

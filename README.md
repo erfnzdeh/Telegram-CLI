@@ -7,9 +7,13 @@ A command-line tool for automating Telegram message forwarding using Telethon.
 - **Batch Forwarding**: Forward up to 100 messages per API call (10-100x more efficient)
 - **Multiple Destinations**: Forward to multiple chats at once
 - **Drop Author**: Remove "Forwarded from" header (appears as original message)
+- **Message Filters**: Filter by type, date, keywords, regex, and more
+- **Message Transforms**: Modify content before forwarding (remove @mentions, links, etc.)
 - **Delete After Forward**: Delete messages from source after forwarding (requires admin)
 - **Real-time Forwarding**: Forward new messages as they arrive
 - **Daemon Mode**: Run multiple forwarding jobs in background with `--daemon`
+- **Interactive TUI**: Beautiful terminal interface for easy navigation
+- **Chat Search**: Search and filter chats by name or type
 - **Resume Capability**: Continue interrupted batch operations
 - **Fault Tolerant**: Automatic checkpointing, graceful shutdown, flood wait handling
 - **Progress Tracking**: Visual progress bars and job status
@@ -86,6 +90,35 @@ Output:
        12345678  [ Private  ]  John Doe (@johndoe)
 ```
 
+**Search and filter chats:**
+
+```bash
+# Search by name
+telegram-cli list-chats --search "backup"
+
+# Filter by type
+telegram-cli list-chats --type channel
+
+# Combine filters
+telegram-cli list-chats --search "news" --type channel --limit 10
+```
+
+### Interactive Mode (TUI)
+
+Launch a beautiful interactive terminal interface:
+
+```bash
+telegram-cli tui
+```
+
+Features:
+- Browse and search chats interactively
+- Set up forwarding with guided prompts
+- View daemon status and job history
+- Easy navigation with keyboard
+
+**Note:** Requires `rich` library (`pip install rich`)
+
 ### Test Permissions
 
 ```bash
@@ -146,6 +179,33 @@ telegram-cli forward-live \
 ```
 
 Press `Ctrl+C` to stop.
+
+### Message Filtering
+
+Filter messages by type, date, content, and more.
+
+```bash
+# Only forward photos and videos
+telegram-cli forward-all -s SOURCE -d DEST --type "photo,video"
+
+# Only messages from last 7 days
+telegram-cli forward-all -s SOURCE -d DEST --after 7d
+
+# Only messages containing "important"
+telegram-cli forward-all -s SOURCE -d DEST --contains "important"
+
+# Exclude messages with links
+telegram-cli forward-all -s SOURCE -d DEST --no-links
+
+# Complex filter: photos from last week, max 10MB
+telegram-cli forward-all -s SOURCE -d DEST \
+    --type photo \
+    --after 1w \
+    --max-size 10MB
+
+# Use regex to filter
+telegram-cli forward-all -s SOURCE -d DEST --regex "price:\s*\$\d+"
+```
 
 ### Message Transforms
 
@@ -231,6 +291,7 @@ telegram-cli status
 | `delete-all` | Delete all messages from a chat |
 | `resume` | Resume an interrupted operation |
 | `status` | Show job history and progress |
+| `tui` | Launch interactive terminal UI |
 | `list` | List running background daemons |
 | `kill` | Kill a background daemon by PID |
 | `logs` | View daemon logs |
@@ -258,6 +319,26 @@ telegram-cli status
 | `--transform` | Transform chain (forward-live only) |
 | `--transform-config` | Config for transform |
 | `--list-transforms` | List available transforms |
+
+### Filter Flags (for forward commands)
+
+| Flag | Description |
+|------|-------------|
+| `--type` | Only these types (photo,video,text,document,audio) |
+| `--exclude-type` | Exclude these types |
+| `--after` | Only messages after date (YYYY-MM-DD or 7d, 1w, 1m) |
+| `--before` | Only messages before date |
+| `--contains` | Must contain text (repeatable, all must match) |
+| `--contains-any` | Must contain any of these (repeatable) |
+| `--excludes` | Must NOT contain text (repeatable) |
+| `--regex` | Must match regex pattern |
+| `--media-only` | Only messages with media |
+| `--text-only` | Only text messages |
+| `--min-size` | Minimum file size (e.g., 1MB) |
+| `--max-size` | Maximum file size (e.g., 100MB) |
+| `--no-replies` | Exclude reply messages |
+| `--no-forwards` | Exclude forwarded messages |
+| `--no-links` | Exclude messages with links |
 
 ### Delete Flags
 

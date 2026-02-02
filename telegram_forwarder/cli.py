@@ -23,6 +23,7 @@ from .errors import (
 )
 from .utils import validate_chat_id
 from .transforms import list_transforms, create_chain_from_spec
+from .filters import MessageFilter, create_filter_from_args
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -101,6 +102,15 @@ Examples:
         action='store_true',
         help='Include archived chats'
     )
+    list_parser.add_argument(
+        '-s', '--search',
+        help='Search chats by name (case-insensitive)'
+    )
+    list_parser.add_argument(
+        '--type',
+        choices=['private', 'group', 'supergroup', 'channel', 'saved'],
+        help='Filter by chat type'
+    )
     
     # Test command
     test_parser = subparsers.add_parser('test', help='Verify permissions for source/destination')
@@ -127,6 +137,7 @@ Examples:
         help='Forward last X messages'
     )
     _add_forward_args(forward_last_parser)
+    _add_filter_args(forward_last_parser)
     forward_last_parser.add_argument(
         '--count',
         type=int,
@@ -140,6 +151,7 @@ Examples:
         help='Start real-time forwarding of new messages'
     )
     _add_forward_args(forward_live_parser)
+    _add_filter_args(forward_live_parser)
     forward_live_parser.add_argument(
         '--transform',
         help='Transform chain to apply (e.g., "replace_mentions", "replace_mentions,strip_formatting")'
@@ -160,6 +172,7 @@ Examples:
         help='Forward all messages in batches'
     )
     _add_forward_args(forward_all_parser)
+    _add_filter_args(forward_all_parser)
     forward_all_parser.add_argument(
         '--batch-size',
         type=int,
@@ -203,6 +216,9 @@ Examples:
     
     # Status command
     subparsers.add_parser('status', help='Show progress of ongoing/interrupted jobs')
+    
+    # TUI command
+    subparsers.add_parser('tui', help='Launch interactive terminal UI (requires rich library)')
     
     # Daemon list command
     subparsers.add_parser('list', help='List running background daemons')
@@ -262,20 +278,6 @@ def _add_forward_args(parser: argparse.ArgumentParser):
         required=True,
         help='Destination chat ID (can be repeated for multiple destinations)'
     )
-
-
-def _add_delete_args(parser: argparse.ArgumentParser):
-    """Add common delete arguments to a parser."""
-    parser.add_argument(
-        '-c', '--chat',
-        required=True,
-        help='Chat ID or username to delete messages from'
-    )
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Preview without executing'
-    )
     parser.add_argument(
         '--drop-author',
         action='store_true',
@@ -294,7 +296,120 @@ def _add_delete_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         '--daemon',
         action='store_true',
-        help='Run in background (daemon mode). Stop with: telegram-forwarder stop'
+        help='Run in background (daemon mode)'
+    )
+
+
+def _add_filter_args(parser: argparse.ArgumentParser):
+    """Add message filter arguments to a parser."""
+    filter_group = parser.add_argument_group('filters')
+    
+    # Type filters
+    filter_group.add_argument(
+        '--type',
+        help='Only forward these types (comma-separated: photo,video,text,document,audio,voice,sticker)'
+    )
+    filter_group.add_argument(
+        '--exclude-type',
+        help='Exclude these types (comma-separated)'
+    )
+    
+    # Date filters
+    filter_group.add_argument(
+        '--after',
+        help='Only messages after this date (YYYY-MM-DD, or relative: 7d, 1w, 1m)'
+    )
+    filter_group.add_argument(
+        '--before',
+        help='Only messages before this date'
+    )
+    
+    # Content filters
+    filter_group.add_argument(
+        '--contains',
+        action='append',
+        help='Must contain this text (can repeat, all must match)'
+    )
+    filter_group.add_argument(
+        '--contains-any',
+        action='append',
+        dest='contains_any',
+        help='Must contain any of these (can repeat)'
+    )
+    filter_group.add_argument(
+        '--excludes',
+        action='append',
+        help='Must NOT contain this text (can repeat)'
+    )
+    filter_group.add_argument(
+        '--regex',
+        help='Must match this regex pattern'
+    )
+    
+    # Media filters
+    filter_group.add_argument(
+        '--media-only',
+        action='store_true',
+        help='Only messages with media'
+    )
+    filter_group.add_argument(
+        '--text-only',
+        action='store_true',
+        help='Only text messages (no media)'
+    )
+    filter_group.add_argument(
+        '--min-size',
+        help='Minimum file size (e.g., 1MB, 500KB)'
+    )
+    filter_group.add_argument(
+        '--max-size',
+        help='Maximum file size (e.g., 100MB)'
+    )
+    
+    # Other filters
+    filter_group.add_argument(
+        '--no-replies',
+        action='store_true',
+        help='Exclude reply messages'
+    )
+    filter_group.add_argument(
+        '--replies-only',
+        action='store_true',
+        help='Only reply messages'
+    )
+    filter_group.add_argument(
+        '--no-forwards',
+        action='store_true',
+        help='Exclude forwarded messages'
+    )
+    filter_group.add_argument(
+        '--forwards-only',
+        action='store_true',
+        help='Only forwarded messages'
+    )
+    filter_group.add_argument(
+        '--no-links',
+        action='store_true',
+        help='Exclude messages with links'
+    )
+    filter_group.add_argument(
+        '--links-only',
+        action='store_true',
+        help='Only messages with links'
+    )
+
+
+def _add_delete_args(parser: argparse.ArgumentParser):
+    """Add common delete arguments to a parser."""
+    parser.add_argument(
+        '-c', '--chat',
+        required=True,
+        help='Chat ID or username to delete messages from'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Preview without executing'
     )
 
 
@@ -366,22 +481,51 @@ async def cmd_list_chats(args, config_manager: ConfigManager, logger: ForwarderL
     try:
         is_authorized = await wrapper.connect()
         if not is_authorized:
-            logger.error("Not logged in. Run 'telegram-forwarder login' first.")
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
-        logger.info("Available chats:")
+        search_term = getattr(args, 'search', None)
+        type_filter = getattr(args, 'type', None)
+        
+        if search_term:
+            logger.info(f"Searching chats for: '{search_term}'")
+        if type_filter:
+            logger.info(f"Filtering by type: {type_filter}")
+        
         logger.info("-" * 60)
         
         count = 0
+        matched = 0
         async for chat_id, title, chat_type in wrapper.list_chats(
-            limit=args.limit,
+            limit=None if search_term else args.limit,  # No limit when searching
             archived=args.archived
         ):
-            print(f"{chat_id:>15}  [{chat_type:^10}]  {title}")
             count += 1
+            
+            # Apply search filter
+            if search_term:
+                if search_term.lower() not in title.lower():
+                    continue
+            
+            # Apply type filter
+            if type_filter:
+                # Normalize type names for comparison
+                type_lower = chat_type.lower().strip()
+                if type_filter.lower() != type_lower:
+                    continue
+            
+            print(f"{chat_id:>15}  [{chat_type:^10}]  {title}")
+            matched += 1
+            
+            # Apply limit after filtering
+            if args.limit and matched >= args.limit:
+                break
         
         logger.info("-" * 60)
-        logger.info(f"Listed {count} chats")
+        if search_term or type_filter:
+            logger.info(f"Found {matched} matching chats (scanned {count})")
+        else:
+            logger.info(f"Listed {matched} chats")
         
         await wrapper.disconnect()
         return 0
@@ -444,12 +588,21 @@ async def cmd_forward_last(
     state_manager: StateManager
 ):
     """Handle forward-last command."""
+    # Parse filters
+    try:
+        msg_filter = create_filter_from_args(args)
+        if not msg_filter.is_empty():
+            logger.info(f"Filters: {msg_filter.describe()}")
+    except ValueError as e:
+        logger.error(f"Invalid filter: {e}")
+        return 1
+    
     wrapper = ClientWrapper(config_manager, logger)
     
     try:
         is_authorized = await wrapper.connect()
         if not is_authorized:
-            logger.error("Not logged in. Run 'telegram-forwarder login' first.")
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
         # Parse chat IDs
@@ -501,6 +654,7 @@ async def cmd_forward_last(
                 drop_author=args.drop_author,
                 delete_after=args.delete,
                 dry_run=args.dry_run,
+                msg_filter=msg_filter if not msg_filter.is_empty() else None,
             )
             
             if shutdown.shutdown_requested:
@@ -532,12 +686,21 @@ async def cmd_forward_all(
     state_manager: StateManager
 ):
     """Handle forward-all command."""
+    # Parse filters
+    try:
+        msg_filter = create_filter_from_args(args)
+        if not msg_filter.is_empty():
+            logger.info(f"Filters: {msg_filter.describe()}")
+    except ValueError as e:
+        logger.error(f"Invalid filter: {e}")
+        return 1
+    
     wrapper = ClientWrapper(config_manager, logger)
     
     try:
         is_authorized = await wrapper.connect()
         if not is_authorized:
-            logger.error("Not logged in. Run 'telegram-forwarder login' first.")
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
         # Parse chat IDs
@@ -588,6 +751,7 @@ async def cmd_forward_all(
                 delete_after=args.delete,
                 batch_size=args.batch_size,
                 dry_run=args.dry_run,
+                msg_filter=msg_filter if not msg_filter.is_empty() else None,
             )
             
             if shutdown.shutdown_requested:
@@ -630,6 +794,15 @@ async def cmd_forward_live(
         logger.info("Usage: --transform 'replace_mentions,strip_formatting'")
         logger.info("With config: --transform 'replace_mentions' --transform-config 'replacement=[removed]'")
         return 0
+    
+    # Parse filters
+    try:
+        msg_filter = create_filter_from_args(args)
+        if not msg_filter.is_empty():
+            logger.info(f"Filters: {msg_filter.describe()}")
+    except ValueError as e:
+        logger.error(f"Invalid filter: {e}")
+        return 1
     
     # Parse transform chain if provided
     transform_chain = None
@@ -703,6 +876,7 @@ async def cmd_forward_live(
                 drop_author=args.drop_author,
                 delete_after=args.delete,
                 transform_chain=transform_chain,
+                msg_filter=msg_filter if not msg_filter.is_empty() else None,
             )
             
             state_manager.mark_completed()
@@ -984,6 +1158,21 @@ async def cmd_status(
     return 0
 
 
+async def cmd_tui(
+    args,
+    config_manager: ConfigManager,
+    logger: ForwarderLogger
+):
+    """Handle tui command - launch interactive interface."""
+    try:
+        from .tui import run_tui
+        return await run_tui(config_manager, logger)
+    except ImportError:
+        logger.error("TUI requires the 'rich' library.")
+        logger.info("Install it with: pip install rich")
+        return 1
+
+
 def cmd_list_daemons(config_manager: ConfigManager) -> int:
     """Handle list command - show running daemons."""
     daemon_manager = get_daemon_manager(config_manager.config_dir)
@@ -1112,6 +1301,7 @@ async def main_async(args: argparse.Namespace) -> int:
         'delete-all': lambda: cmd_delete_all(args, config_manager, logger, state_manager),
         'resume': lambda: cmd_resume(args, config_manager, logger, state_manager),
         'status': lambda: cmd_status(args, config_manager, logger, state_manager),
+        'tui': lambda: cmd_tui(args, config_manager, logger),
     }
     
     if args.command is None:

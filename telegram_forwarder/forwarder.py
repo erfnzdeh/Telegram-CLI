@@ -25,6 +25,7 @@ from .utils import (
     format_estimate,
 )
 from .transforms import TransformChain
+from .filters import MessageFilter
 
 
 @dataclass
@@ -393,7 +394,8 @@ class Forwarder:
         delete_after: bool = False,
         batch_size: int = 100,
         min_id: int = 0,
-        dry_run: bool = False
+        dry_run: bool = False,
+        msg_filter: Optional[MessageFilter] = None
     ) -> Tuple[int, int, int]:
         """Forward all messages using efficient batch API calls.
         
@@ -405,6 +407,7 @@ class Forwarder:
             batch_size: Messages per batch (max 100)
             min_id: Minimum message ID (for resume)
             dry_run: If True, don't actually forward
+            msg_filter: Optional message filter
             
         Returns:
             Tuple of (processed, skipped, failed)
@@ -415,12 +418,15 @@ class Forwarder:
         batch = []
         processed = 0
         skipped = 0
+        filtered = 0
         failed = 0
         
         total_estimate = await estimate_message_count(self.client, source_id, min_id)
         
         self.logger.info(f"Starting forward-all from {source_id}")
         self.logger.info(f"Estimated messages: {format_estimate(total_estimate)}")
+        if msg_filter:
+            self.logger.info("Note: Actual count may be lower due to filters")
         
         async for message in self.client.iter_messages(
             source_id,
@@ -438,6 +444,14 @@ class Forwarder:
                 skipped += 1
                 self.logger.verbose(f"Skip msg {message.id}: {reason}")
                 continue
+            
+            # Apply custom filter
+            if msg_filter:
+                matches, filter_reason = msg_filter.matches(message)
+                if not matches:
+                    filtered += 1
+                    self.logger.verbose(f"Filter msg {message.id}: {filter_reason}")
+                    continue
             
             batch.append(message)
             
@@ -472,12 +486,15 @@ class Forwarder:
                 failed += result.failed_count // len(dest_ids)
             
             processed += len(batch)
-            self.state.update_progress(batch[-1].id, processed, skipped, failed)
+            self.state.update_progress(batch[-1].id, processed, skipped + filtered, failed)
         
         self.logger.progress_done()
-        self.logger.info(f"Complete: {processed} forwarded, {skipped} skipped, {failed} failed")
+        skip_info = f"{skipped} skipped"
+        if filtered > 0:
+            skip_info += f", {filtered} filtered"
+        self.logger.info(f"Complete: {processed} forwarded, {skip_info}, {failed} failed")
         
-        return processed, skipped, failed
+        return processed, skipped + filtered, failed
     
     async def forward_last(
         self,
@@ -486,7 +503,8 @@ class Forwarder:
         count: int,
         drop_author: bool = False,
         delete_after: bool = False,
-        dry_run: bool = False
+        dry_run: bool = False,
+        msg_filter: Optional[MessageFilter] = None
     ) -> Tuple[int, int, int]:
         """Forward the last N messages efficiently.
         
@@ -497,6 +515,7 @@ class Forwarder:
             drop_author: Remove "Forwarded from" header
             delete_after: Delete from source after forwarding
             dry_run: If True, don't actually forward
+            msg_filter: Optional message filter
             
         Returns:
             Tuple of (processed, skipped, failed)
@@ -506,23 +525,36 @@ class Forwarder:
         # Collect messages (newest first, then reverse)
         messages = []
         skipped = 0
+        filtered = 0
         
         async for message in self.client.iter_messages(source_id, limit=count):
             forwardable, reason = is_forwardable(message)
-            if forwardable:
-                messages.append(message)
-            else:
+            if not forwardable:
                 skipped += 1
                 self.logger.verbose(f"Skip msg {message.id}: {reason}")
+                continue
+            
+            # Apply custom filter
+            if msg_filter:
+                matches, filter_reason = msg_filter.matches(message)
+                if not matches:
+                    filtered += 1
+                    self.logger.verbose(f"Filter msg {message.id}: {filter_reason}")
+                    continue
+            
+            messages.append(message)
         
         # Reverse to forward oldest first (maintains order)
         messages.reverse()
         
         if not messages:
             self.logger.info("No forwardable messages found")
-            return 0, skipped, 0
+            return 0, skipped + filtered, 0
         
-        self.logger.info(f"Found {len(messages)} forwardable messages (skipped {skipped})")
+        skip_info = f"skipped {skipped}"
+        if filtered > 0:
+            skip_info += f", filtered {filtered}"
+        self.logger.info(f"Found {len(messages)} forwardable messages ({skip_info})")
         
         if dry_run:
             self.logger.info("[DRY RUN] Would forward these messages")
@@ -558,7 +590,8 @@ class Forwarder:
         dest_ids: List[int],
         drop_author: bool = False,
         delete_after: bool = False,
-        transform_chain: Optional[TransformChain] = None
+        transform_chain: Optional[TransformChain] = None,
+        msg_filter: Optional[MessageFilter] = None
     ):
         """Start real-time forwarding of new messages.
         
@@ -568,11 +601,14 @@ class Forwarder:
             drop_author: Remove "Forwarded from" header
             delete_after: Delete from source after forwarding
             transform_chain: Optional transform chain to apply to messages
+            msg_filter: Optional message filter
         """
         self.logger.info(f"Starting live forwarding from {source_id}")
         self.logger.info(f"Destinations: {', '.join(map(str, dest_ids))}")
         if transform_chain:
             self.logger.info(f"Transform: enabled ({len(transform_chain)} transforms)")
+        if msg_filter:
+            self.logger.info(f"Filters: {msg_filter.describe()}")
         self.logger.info("Press Ctrl+C to stop...")
         
         @self.client.on(events.NewMessage(chats=[source_id]))
@@ -583,6 +619,13 @@ class Forwarder:
             if not forwardable:
                 self.logger.verbose(f"Skip live msg {message.id}: {reason}")
                 return
+            
+            # Apply custom filter
+            if msg_filter:
+                matches, filter_reason = msg_filter.matches(message)
+                if not matches:
+                    self.logger.verbose(f"Filter live msg {message.id}: {filter_reason}")
+                    return
             
             try:
                 # If transform is provided, send transformed message instead of forwarding
