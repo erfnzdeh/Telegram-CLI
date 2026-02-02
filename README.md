@@ -2,6 +2,8 @@
 
 A command-line tool for automating Telegram message forwarding using Telethon.
 
+![Telegram-CLI Demo](Telegram-CLI%20Demo.gif)
+
 ## Features
 
 - **Batch Forwarding**: Forward up to 100 messages per API call (10-100x more efficient)
