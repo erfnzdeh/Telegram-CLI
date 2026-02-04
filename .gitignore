@@ -79,6 +79,10 @@ venv.bak/
 # Config with credentials
 config.json
 
+# Route configs (except example)
+*.yaml
+!routes.example.yaml
+
 # Job state and logs
 jobs.json
 logs/
