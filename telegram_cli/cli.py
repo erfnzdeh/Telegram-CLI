@@ -71,6 +71,10 @@ Examples:
         action='store_true',
         help='Skip confirmation prompts'
     )
+    parser.add_argument(
+        '-a', '--account',
+        help='Account alias to use (default: active account)'
+    )
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
@@ -219,6 +223,67 @@ Examples:
     
     # TUI command
     subparsers.add_parser('tui', help='Launch interactive terminal UI (requires rich library)')
+    
+    # Account management commands
+    account_parser = subparsers.add_parser('account', help='Manage multiple Telegram accounts')
+    account_subparsers = account_parser.add_subparsers(dest='account_command', help='Account commands')
+    
+    # account list
+    account_subparsers.add_parser('list', help='List all registered accounts')
+    
+    # account add
+    account_add_parser = account_subparsers.add_parser('add', help='Add a new account')
+    account_add_parser.add_argument(
+        'alias',
+        help='Unique alias for the account (e.g., personal, work)'
+    )
+    account_add_parser.add_argument(
+        '--api-id',
+        type=int,
+        help='Telegram API ID (will prompt if not provided)'
+    )
+    account_add_parser.add_argument(
+        '--api-hash',
+        help='Telegram API hash (will prompt if not provided)'
+    )
+    
+    # account switch
+    account_switch_parser = account_subparsers.add_parser('switch', help='Switch active account')
+    account_switch_parser.add_argument(
+        'alias',
+        help='Account alias to switch to'
+    )
+    
+    # account remove
+    account_remove_parser = account_subparsers.add_parser('remove', help='Remove an account')
+    account_remove_parser.add_argument(
+        'alias',
+        help='Account alias to remove'
+    )
+    account_remove_parser.add_argument(
+        '--keep-data',
+        action='store_true',
+        help='Keep account data files (session, config)'
+    )
+    
+    # account rename
+    account_rename_parser = account_subparsers.add_parser('rename', help='Rename an account alias')
+    account_rename_parser.add_argument(
+        'old_alias',
+        help='Current account alias'
+    )
+    account_rename_parser.add_argument(
+        'new_alias',
+        help='New account alias'
+    )
+    
+    # account info
+    account_info_parser = account_subparsers.add_parser('info', help='Show account details')
+    account_info_parser.add_argument(
+        'alias',
+        nargs='?',
+        help='Account alias (shows active if not specified)'
+    )
     
     # Daemon list command
     subparsers.add_parser('list', help='List running background daemons')
@@ -542,7 +607,7 @@ async def cmd_test(args, config_manager: ConfigManager, logger: ForwarderLogger)
     try:
         is_authorized = await wrapper.connect()
         if not is_authorized:
-            logger.error("Not logged in. Run 'telegram-forwarder login' first.")
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
         # Parse chat IDs
@@ -659,7 +724,7 @@ async def cmd_forward_last(
             
             if shutdown.shutdown_requested:
                 state_manager.mark_interrupted()
-                logger.info(f"Resume with: telegram-forwarder resume {job.job_id}")
+                logger.info(f"Resume with: telegram-cli resume {job.job_id}")
             else:
                 state_manager.mark_completed()
             
@@ -756,7 +821,7 @@ async def cmd_forward_all(
             
             if shutdown.shutdown_requested:
                 state_manager.mark_interrupted()
-                logger.info(f"Resume with: telegram-forwarder resume {job.job_id}")
+                logger.info(f"Resume with: telegram-cli resume {job.job_id}")
             else:
                 state_manager.mark_completed()
             
@@ -1046,7 +1111,7 @@ async def cmd_resume(
             progress = f"{job.total_processed}/{job.total_messages}" if job.total_messages else f"{job.total_processed}"
             print(f"  {job.job_id}  {job.job_type:^12}  {progress} msgs  from {job.source}")
         logger.info("-" * 60)
-        logger.info("Resume with: telegram-forwarder resume <job_id>")
+        logger.info("Resume with: telegram-cli resume <job_id>")
         return 0
     
     # Resume specific job
@@ -1060,7 +1125,7 @@ async def cmd_resume(
     try:
         is_authorized = await wrapper.connect()
         if not is_authorized:
-            logger.error("Not logged in. Run 'telegram-forwarder login' first.")
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
         # Create shutdown handler
@@ -1094,7 +1159,7 @@ async def cmd_resume(
             
             if shutdown.shutdown_requested:
                 state_manager.mark_interrupted()
-                logger.info(f"Resume with: telegram-forwarder resume {job.job_id}")
+                logger.info(f"Resume with: telegram-cli resume {job.job_id}")
             else:
                 state_manager.mark_completed()
             
@@ -1173,6 +1238,221 @@ async def cmd_tui(
         return 1
 
 
+async def cmd_account(args, logger: ForwarderLogger) -> int:
+    """Handle account subcommands."""
+    from .accounts import get_account_manager
+    from .config import ConfigManager
+    
+    account_mgr = get_account_manager()
+    
+    # No subcommand - show current account
+    if not args.account_command:
+        active = account_mgr.get_active()
+        if active:
+            account = account_mgr.get_account(active)
+            if account:
+                logger.info(f"Active account: {active}")
+                if account.username:
+                    logger.info(f"  Username: @{account.username}")
+                if account.first_name:
+                    logger.info(f"  Name: {account.first_name}")
+            else:
+                logger.info(f"Active account: {active}")
+        else:
+            logger.info("No accounts configured.")
+            logger.info("Add one with: telegram-cli account add <alias>")
+        return 0
+    
+    # account list
+    if args.account_command == 'list':
+        accounts = account_mgr.list_accounts()
+        active = account_mgr.get_active()
+        
+        if not accounts:
+            logger.info("No accounts registered.")
+            logger.info("Add one with: telegram-cli account add <alias>")
+            return 0
+        
+        logger.info(f"Registered accounts ({len(accounts)}):")
+        logger.info("-" * 60)
+        
+        for acc in accounts:
+            marker = "*" if acc.alias == active else " "
+            display = acc.display_name()
+            print(f"  {marker} {acc.alias:<15}  {display}")
+        
+        logger.info("-" * 60)
+        logger.info("* = active account")
+        logger.info("Switch with: telegram-cli account switch <alias>")
+        return 0
+    
+    # account add
+    if args.account_command == 'add':
+        alias = args.alias
+        
+        # Check if alias is valid
+        try:
+            account = account_mgr.add_account(alias)
+            logger.info(f"Created account: {alias}")
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+        
+        # Get API credentials
+        api_id = args.api_id
+        api_hash = args.api_hash
+        
+        if not api_id or not api_hash:
+            logger.info("API credentials required. Get them from https://my.telegram.org")
+            try:
+                if not api_id:
+                    api_id = int(input("Enter API ID: ").strip())
+                if not api_hash:
+                    api_hash = input("Enter API Hash: ").strip()
+            except (ValueError, EOFError):
+                logger.error("Invalid API credentials")
+                account_mgr.remove_account(alias)
+                return 1
+        
+        # Create config manager for this account
+        config_manager = ConfigManager(account=alias)
+        config = config_manager.get_config()
+        config.api_id = api_id
+        config.api_hash = api_hash
+        config_manager.save(config)
+        
+        # Login
+        from .client import ClientWrapper
+        wrapper = ClientWrapper(config_manager, logger)
+        
+        try:
+            is_authorized = await wrapper.connect()
+            
+            if is_authorized:
+                me = wrapper.me
+                logger.success(f"Already logged in as {me.first_name} (@{me.username or 'no username'})")
+            else:
+                me = await wrapper.login()
+            
+            # Update account info
+            account_mgr.update_account(
+                alias,
+                phone=me.phone,
+                username=me.username,
+                first_name=me.first_name,
+                user_id=me.id
+            )
+            
+            await wrapper.disconnect()
+            logger.success(f"Account '{alias}' configured successfully!")
+            return 0
+            
+        except Exception as e:
+            logger.error(f"Login failed: {e}")
+            # Keep the account but note login failed
+            return 1
+    
+    # account switch
+    if args.account_command == 'switch':
+        alias = args.alias
+        
+        if account_mgr.set_active(alias):
+            account = account_mgr.get_account(alias)
+            logger.success(f"Switched to account: {alias}")
+            if account and account.username:
+                logger.info(f"  Username: @{account.username}")
+            return 0
+        else:
+            logger.error(f"Account '{alias}' not found.")
+            logger.info("List accounts with: telegram-cli account list")
+            return 1
+    
+    # account remove
+    if args.account_command == 'remove':
+        alias = args.alias
+        
+        account = account_mgr.get_account(alias)
+        if not account:
+            logger.error(f"Account '{alias}' not found.")
+            return 1
+        
+        # Confirm
+        if not args.yes:
+            try:
+                confirm = input(f"Remove account '{alias}'? [y/N]: ").strip().lower()
+                if confirm != 'y':
+                    logger.info("Cancelled.")
+                    return 0
+            except EOFError:
+                logger.info("Cancelled.")
+                return 0
+        
+        delete_data = not getattr(args, 'keep_data', False)
+        
+        if account_mgr.remove_account(alias, delete_data=delete_data):
+            logger.success(f"Account '{alias}' removed.")
+            if not delete_data:
+                logger.info("Data files were kept.")
+            return 0
+        else:
+            logger.error(f"Failed to remove account '{alias}'.")
+            return 1
+    
+    # account rename
+    if args.account_command == 'rename':
+        old_alias = args.old_alias
+        new_alias = args.new_alias
+        
+        try:
+            if account_mgr.rename_account(old_alias, new_alias):
+                logger.success(f"Renamed account '{old_alias}' to '{new_alias}'")
+                return 0
+            else:
+                logger.error(f"Account '{old_alias}' not found.")
+                return 1
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+    
+    # account info
+    if args.account_command == 'info':
+        alias = args.alias or account_mgr.get_active()
+        
+        if not alias:
+            logger.error("No account specified and no active account.")
+            return 1
+        
+        account = account_mgr.get_account(alias)
+        if not account:
+            logger.error(f"Account '{alias}' not found.")
+            return 1
+        
+        active = account_mgr.get_active()
+        
+        logger.info(f"Account: {account.alias}" + (" (active)" if alias == active else ""))
+        if account.first_name:
+            logger.info(f"  Name: {account.first_name}")
+        if account.username:
+            logger.info(f"  Username: @{account.username}")
+        if account.phone:
+            # Mask phone for privacy
+            masked = f"{account.phone[:4]}...{account.phone[-2:]}" if len(account.phone) > 6 else "***"
+            logger.info(f"  Phone: {masked}")
+        if account.user_id:
+            logger.info(f"  User ID: {account.user_id}")
+        if account.created_at:
+            logger.info(f"  Created: {account.created_at[:19]}")
+        
+        # Show account directory
+        account_dir = account_mgr.get_account_dir(alias)
+        logger.info(f"  Directory: {account_dir}")
+        
+        return 0
+    
+    logger.error(f"Unknown account command: {args.account_command}")
+    return 1
+
+
 def cmd_list_daemons(config_manager: ConfigManager) -> int:
     """Handle list command - show running daemons."""
     daemon_manager = get_daemon_manager(config_manager.config_dir)
@@ -1194,8 +1474,8 @@ def cmd_list_daemons(config_manager: ConfigManager) -> int:
         print(f"{proc.pid:>8}  {proc.command:<20}  {source:>12}  {started}")
     
     print("-" * 70)
-    print(f"Kill with: telegram-forwarder kill <PID>")
-    print(f"View logs: telegram-forwarder logs <PID>")
+    print(f"Kill with: telegram-cli kill <PID>")
+    print(f"View logs: telegram-cli logs <PID>")
     
     return 0
 
@@ -1219,8 +1499,8 @@ def cmd_kill(args, config_manager: ConfigManager) -> int:
                 print(f"  PID {proc.pid}: {proc.command}")
             print()
             print("Specify a PID or use --all to kill all:")
-            print("  telegram-forwarder kill <PID>")
-            print("  telegram-forwarder kill --all")
+            print("  telegram-cli kill <PID>")
+            print("  telegram-cli kill --all")
             return 0
         
         killed, failed = daemon_manager.kill_all()
@@ -1283,10 +1563,21 @@ async def main_async(args: argparse.Namespace) -> int:
     else:
         verbosity = 1 + args.verbose
     
-    # Initialize managers
-    config_manager = get_config_manager()
-    logger = get_logger(config_manager.config_dir, verbosity)
+    # Get account from args (--account / -a flag)
+    account = getattr(args, 'account', None)
+    
+    # Initialize managers with account support
+    config_manager = get_config_manager(account=account)
+    logger = get_logger(config_manager.base_dir, verbosity)
     state_manager = get_state_manager(config_manager.jobs_file)
+    
+    # Show which account is being used (if multiple accounts exist)
+    from .accounts import get_account_manager
+    account_mgr = get_account_manager(config_manager.base_dir)
+    if account_mgr.has_accounts() and verbosity >= 2:
+        active = account_mgr.get_active()
+        if active:
+            logger.verbose(f"Using account: {active}")
     
     # Route to command handler
     command_handlers = {
@@ -1302,6 +1593,7 @@ async def main_async(args: argparse.Namespace) -> int:
         'resume': lambda: cmd_resume(args, config_manager, logger, state_manager),
         'status': lambda: cmd_status(args, config_manager, logger, state_manager),
         'tui': lambda: cmd_tui(args, config_manager, logger),
+        'account': lambda: cmd_account(args, logger),
     }
     
     if args.command is None:
@@ -1368,9 +1660,9 @@ def main():
         if child_pid > 0:
             # We're in the parent
             print(f"PID: {child_pid}")
-            print(f"Logs: telegram-forwarder logs {child_pid}")
-            print(f"Kill: telegram-forwarder kill {child_pid}")
-            print(f"List: telegram-forwarder list")
+            print(f"Logs: telegram-cli logs {child_pid}")
+            print(f"Kill: telegram-cli kill {child_pid}")
+            print(f"List: telegram-cli list")
             sys.exit(0)
         
         # We're in the child - continue with normal execution

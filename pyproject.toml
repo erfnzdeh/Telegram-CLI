@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "telegram-cli"
 dynamic = ["version"]
-description = "CLI tool for automating Telegram message forwarding"
+description = "CLI tool for Telegram automation - forward, delete, and manage messages"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
@@ -40,11 +40,11 @@ Repository = "https://github.com/erfnzdeh/Telegram-CLI"
 Issues = "https://github.com/erfnzdeh/Telegram-CLI/issues"
 
 [project.scripts]
-telegram-cli = "telegram_forwarder.cli:main"
+telegram-cli = "telegram_cli.cli:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "telegram_forwarder.__version__"}
+version = {attr = "telegram_cli.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["telegram_forwarder*"]
+include = ["telegram_cli*"]

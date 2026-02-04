@@ -6,6 +6,7 @@ A command-line tool for automating Telegram message forwarding using Telethon.
 
 ## Features
 
+- **Multi-Account Support**: Manage multiple Telegram accounts with easy switching
 - **Batch Forwarding**: Forward up to 100 messages per API call (10-100x more efficient)
 - **Multiple Destinations**: Forward to multiple chats at once
 - **Drop Author**: Remove "Forwarded from" header (appears as original message)
@@ -76,6 +77,63 @@ telegram-cli login
 ```
 
 You'll be prompted to enter your API credentials, phone number, and verification code.
+
+## Multi-Account Support
+
+Telegram CLI supports multiple Telegram accounts. Each account has its own session, configuration, and job history.
+
+### Add Accounts
+
+```bash
+# Add your first account
+telegram-cli account add personal
+
+# Add another account
+telegram-cli account add work
+```
+
+You'll be prompted for API credentials and phone verification for each account.
+
+### List Accounts
+
+```bash
+telegram-cli account list
+```
+
+Output:
+```
+Registered accounts (2):
+------------------------------------------------------------
+  * personal        @yourname
+    work            @workaccount
+------------------------------------------------------------
+* = active account
+```
+
+### Switch Accounts
+
+```bash
+telegram-cli account switch work
+```
+
+### Use a Specific Account for a Command
+
+```bash
+# Use the -a/--account flag to run a command with a specific account
+telegram-cli -a personal list-chats
+telegram-cli -a work forward-live -s -100123456 -d -100789012
+```
+
+### Account Commands
+
+| Command | Description |
+|---------|-------------|
+| `account list` | List all registered accounts |
+| `account add <alias>` | Add a new account |
+| `account switch <alias>` | Set active account |
+| `account remove <alias>` | Remove an account |
+| `account rename <old> <new>` | Rename an account |
+| `account info [alias]` | Show account details |
 
 ## Usage
 
@@ -284,6 +342,7 @@ telegram-cli status
 |---------|-------------|
 | `login` | Authenticate with Telegram |
 | `logout` | Clear session and log out |
+| `account` | Manage multiple Telegram accounts |
 | `list-chats` | List available chats with IDs |
 | `test` | Verify permissions for source/destination |
 | `forward-last` | Forward last X messages |
@@ -302,6 +361,7 @@ telegram-cli status
 
 | Flag | Description |
 |------|-------------|
+| `-a, --account` | Account alias to use (default: active account) |
 | `-v, --verbose` | Increase verbosity (stack: -vv, -vvv) |
 | `-q, --quiet` | Suppress all output except errors |
 | `-y, --yes` | Skip confirmation prompts |
@@ -424,11 +484,21 @@ telegram-cli logs -n 100
 
 Configuration is stored in `~/.telegram-cli/`:
 
-- `config.json` - API credentials and settings
-- `session.session` - Telegram session file
-- `jobs.json` - Job history and progress
-- `daemons.json` - Running daemon processes
-- `logs/` - Log files (per daemon and daily)
+```
+~/.telegram-cli/
+├── accounts.json          # Account registry (active account, metadata)
+├── accounts/
+│   ├── personal/          # Account directory
+│   │   ├── config.json    # API credentials
+│   │   ├── session.session
+│   │   └── jobs.json
+│   └── work/
+│       └── ...
+├── daemons.json           # Running daemon processes
+└── logs/                  # Log files (shared)
+```
+
+**Note:** If upgrading from an older version, existing sessions are automatically migrated to the new multi-account structure.
 
 ### Environment Variables
 

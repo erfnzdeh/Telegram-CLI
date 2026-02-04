@@ -1,4 +1,4 @@
-"""Configuration management for Telegram Forwarder."""
+"""Configuration management for Telegram CLI."""
 
 import json
 import os
@@ -18,7 +18,7 @@ class Config:
     """Application configuration."""
     api_id: Optional[int] = None
     api_hash: Optional[str] = None
-    session_name: str = "telegram_forwarder"
+    session_name: str = "session"
     
     # Defaults
     batch_size: int = 100
@@ -34,21 +34,50 @@ class Config:
 
 
 class ConfigManager:
-    """Manages configuration loading and saving."""
+    """Manages configuration loading and saving.
     
-    DEFAULT_CONFIG_DIR = Path.home() / ".telegram-forwarder"
+    Supports multi-account mode where each account has its own directory
+    under ~/.telegram-cli/accounts/<alias>/
+    """
+    
+    DEFAULT_CONFIG_DIR = Path.home() / ".telegram-cli"
+    LEGACY_CONFIG_DIR = Path.home() / ".telegram-forwarder"  # For migration
     CONFIG_FILE = "config.json"
     
-    def __init__(self, config_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        config_dir: Optional[Path] = None,
+        account: Optional[str] = None,
+        base_dir: Optional[Path] = None
+    ):
         """Initialize config manager.
         
         Args:
-            config_dir: Directory for config files (defaults to ~/.telegram-forwarder)
+            config_dir: Explicit directory for config files (overrides account)
+            account: Account alias to use (loads from accounts/<alias>/)
+            base_dir: Base directory (defaults to ~/.telegram-cli)
         """
-        self.config_dir = config_dir or self.DEFAULT_CONFIG_DIR
+        self.base_dir = base_dir or self.DEFAULT_CONFIG_DIR
+        self.account = account
+        
+        if config_dir:
+            # Explicit config_dir takes precedence
+            self.config_dir = config_dir
+        elif account:
+            # Account-specific directory
+            self.config_dir = self.base_dir / "accounts" / account
+        else:
+            # Legacy mode: use base directory directly
+            self.config_dir = self.base_dir
+        
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.config_file = self.config_dir / self.CONFIG_FILE
         self._config: Optional[Config] = None
+    
+    @property
+    def logs_dir(self) -> Path:
+        """Get path to shared logs directory."""
+        return self.base_dir / "logs"
     
     @property
     def session_path(self) -> Path:
@@ -179,13 +208,77 @@ class ConfigManager:
         )
 
 
-def get_config_manager(config_dir: Optional[Path] = None) -> ConfigManager:
+def get_config_manager(
+    config_dir: Optional[Path] = None,
+    account: Optional[str] = None,
+    base_dir: Optional[Path] = None,
+    auto_migrate: bool = True
+) -> ConfigManager:
     """Get a ConfigManager instance.
     
+    This function handles multi-account mode automatically:
+    1. If account is specified, uses that account's directory
+    2. If no account, checks for active account in AccountManager
+    3. If no accounts exist, checks for legacy migration
+    
     Args:
-        config_dir: Optional custom config directory
+        config_dir: Explicit config directory (overrides account)
+        account: Account alias to use
+        base_dir: Base directory for all config
+        auto_migrate: If True, auto-migrate legacy setups
         
     Returns:
         ConfigManager instance
     """
-    return ConfigManager(config_dir)
+    from .accounts import get_account_manager
+    
+    if base_dir is None:
+        base_dir = ConfigManager.DEFAULT_CONFIG_DIR
+    
+    # If explicit config_dir, use it directly
+    if config_dir:
+        return ConfigManager(config_dir=config_dir, base_dir=base_dir)
+    
+    # Get account manager
+    account_mgr = get_account_manager(base_dir)
+    
+    # Handle migration from legacy setup
+    if auto_migrate and account_mgr.needs_migration():
+        migrated = account_mgr.migrate_legacy()
+        if migrated:
+            account = migrated
+    
+    # Also check for legacy .telegram-forwarder directory
+    legacy_dir = ConfigManager.LEGACY_CONFIG_DIR
+    if auto_migrate and legacy_dir.exists() and not account_mgr.has_accounts():
+        # Migrate from old .telegram-forwarder to new .telegram-cli
+        import shutil
+        
+        # Move all files to new location first
+        for item in legacy_dir.iterdir():
+            target = base_dir / item.name
+            if not target.exists():
+                shutil.move(str(item), str(target))
+        
+        # Now check if migration to accounts is needed
+        if account_mgr.needs_migration():
+            migrated = account_mgr.migrate_legacy()
+            if migrated:
+                account = migrated
+        
+        # Try to remove legacy dir if empty
+        try:
+            legacy_dir.rmdir()
+        except OSError:
+            pass
+    
+    # If no account specified, try to get active account
+    if not account:
+        account = account_mgr.get_active()
+    
+    # If still no account and none exist, we're in initial setup
+    if not account and not account_mgr.has_accounts():
+        # Return base config manager for initial login
+        return ConfigManager(base_dir=base_dir)
+    
+    return ConfigManager(account=account, base_dir=base_dir)

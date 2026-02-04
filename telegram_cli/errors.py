@@ -172,7 +172,7 @@ class GracefulShutdown:
             self.state.save_checkpoint(self.current_message_id)
             job_id = self.state.current_job_id
             if self.logger:
-                self.logger.info(f"Progress saved. Resume with: telegram-forwarder resume {job_id}")
+                self.logger.info(f"Progress saved. Resume with: telegram-cli resume {job_id}")
         
         return True
 

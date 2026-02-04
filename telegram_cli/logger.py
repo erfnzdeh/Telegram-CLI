@@ -36,7 +36,7 @@ class ForwarderLogger:
     
     def _setup_file_logger(self) -> logging.Logger:
         """Set up file-based logger."""
-        logger = logging.getLogger("telegram_forwarder")
+        logger = logging.getLogger("telegram_cli")
         logger.setLevel(logging.DEBUG)
         
         # Remove existing handlers to avoid duplicates
@@ -168,6 +168,6 @@ def get_logger(config_dir: Optional[Path] = None, verbosity: int = 1) -> Forward
         ForwarderLogger instance
     """
     if config_dir is None:
-        config_dir = Path.home() / ".telegram-forwarder"
+        config_dir = Path.home() / ".telegram-cli"
     
     return ForwarderLogger(config_dir, verbosity)

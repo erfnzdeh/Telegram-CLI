@@ -1,8 +1,9 @@
-"""Telegram CLI Autoforwarder - Forward messages between Telegram chats."""
+"""Telegram CLI - Automation tool for Telegram message management."""
 
 __version__ = "1.0.0"
 
 from .config import ConfigManager, get_config_manager
+from .accounts import AccountManager, AccountInfo, get_account_manager
 from .logger import ForwarderLogger, get_logger
 from .state import StateManager, JobType, JobStatus, get_state_manager
 from .client import ClientWrapper, create_client, get_client
@@ -52,6 +53,10 @@ __all__ = [
     # Config
     "ConfigManager",
     "get_config_manager",
+    # Accounts
+    "AccountManager",
+    "AccountInfo",
+    "get_account_manager",
     # Logger
     "ForwarderLogger",
     "get_logger",
