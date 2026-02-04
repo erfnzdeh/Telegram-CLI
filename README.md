@@ -7,6 +7,8 @@ A command-line tool for automating Telegram message forwarding using Telethon.
 ## Features
 
 - **Multi-Account Support**: Manage multiple Telegram accounts with easy switching
+- **@Username Support**: Use `@channelname` instead of numeric IDs - auto-resolved from your chats
+- **Config-Based Routing**: Define multiple sources with per-destination transforms in `routes.yaml`
 - **Batch Forwarding**: Forward up to 100 messages per API call (10-100x more efficient)
 - **Multiple Destinations**: Forward to multiple chats at once
 - **Drop Author**: Remove "Forwarded from" header (appears as original message)
@@ -15,6 +17,7 @@ A command-line tool for automating Telegram message forwarding using Telethon.
 - **Delete After Forward**: Delete messages from source after forwarding (requires admin)
 - **Real-time Forwarding**: Forward new messages as they arrive
 - **Daemon Mode**: Run multiple forwarding jobs in background with `--daemon`
+- **Daemon Restore**: Automatically restart daemons after system reboot
 - **Interactive TUI**: Beautiful terminal interface for easy navigation
 - **Chat Search**: Search and filter chats by name or type
 - **Resume Capability**: Continue interrupted batch operations
@@ -121,7 +124,7 @@ telegram-cli account switch work
 ```bash
 # Use the -a/--account flag to run a command with a specific account
 telegram-cli -a personal list-chats
-telegram-cli -a work forward-live -s -100123456 -d -100789012
+telegram-cli -a work forward-live -s @source -d @backup
 ```
 
 ### Account Commands
@@ -137,6 +140,24 @@ telegram-cli -a work forward-live -s -100123456 -d -100789012
 
 ## Usage
 
+### Using @Username Instead of IDs
+
+You can use `@username` format for source and destination chats instead of numeric IDs. The CLI will automatically resolve them:
+
+```bash
+# Using @username (recommended - easier to read)
+telegram-cli forward-live -s @source_channel -d @backup_channel
+
+# Username without @ also works
+telegram-cli forward-live -s source_channel -d backup_channel
+
+# Numeric IDs still work
+telegram-cli forward-live -s -1001234567890 -d -1009876543210
+
+# Mix formats
+telegram-cli forward-last -s @news_channel -d -1001234567890 --count 50
+```
+
 ### List Available Chats
 
 ```bash
@@ -145,10 +166,12 @@ telegram-cli list-chats
 
 Output:
 ```
-     -100123456  [  Channel  ]  My Source Channel
-     -100789012  [  Channel  ]  Backup Channel
+     -100123456  [  Channel  ]  My Source Channel (@mysource)
+     -100789012  [  Channel  ]  Backup Channel (@backup)
        12345678  [ Private  ]  John Doe (@johndoe)
 ```
+
+Use the `@username` shown in the list for easier reference.
 
 **Search and filter chats:**
 
@@ -182,36 +205,39 @@ Features:
 ### Test Permissions
 
 ```bash
-telegram-cli test -s -100123456 -d -100789012 --delete
+telegram-cli test -s @source_channel -d @backup_channel --delete
 ```
 
 ### Forward Last N Messages
 
 ```bash
 # Basic forward (with "Forwarded from" header)
-telegram-cli forward-last -s -100123456 -d -100789012 --count 50
+telegram-cli forward-last -s @source_channel -d @backup_channel --count 50
 
 # Without "Forwarded from" header
-telegram-cli forward-last -s -100123456 -d -100789012 --count 50 --drop-author
+telegram-cli forward-last -s @source_channel -d @backup_channel --count 50 --drop-author
 
 # Forward to multiple destinations
 telegram-cli forward-last \
-    -s -100123456 \
-    -d -100789012 \
-    -d -100789013 \
+    -s @source_channel \
+    -d @backup1 \
+    -d @backup2 \
     --count 50 \
     --drop-author
 
 # Forward and delete from source
-telegram-cli forward-last -s -100123456 -d -100789012 --count 50 --delete
+telegram-cli forward-last -s @source -d @dest --count 50 --delete
+
+# Using numeric IDs also works
+telegram-cli forward-last -s -100123456 -d -100789012 --count 50
 ```
 
 ### Forward All Messages
 
 ```bash
 telegram-cli forward-all \
-    -s -100123456 \
-    -d -100789012 \
+    -s @source_channel \
+    -d @backup_channel \
     --drop-author
 ```
 
@@ -232,10 +258,14 @@ Complete: 12500 forwarded, 150 skipped, 0 failed
 ### Real-time Forwarding
 
 ```bash
+# Single source/destination
 telegram-cli forward-live \
-    -s -100123456 \
-    -d -100789012 \
+    -s @source_channel \
+    -d @backup_channel \
     --drop-author
+
+# Multiple sources with config file (see Config-Based Routing section)
+telegram-cli forward-live --config routes.yaml
 ```
 
 Press `Ctrl+C` to stop.
@@ -307,17 +337,95 @@ telegram-cli forward-live \
 | `add_suffix` | Add text at the end |
 | `regex_replace` | Custom regex replacement |
 
+### Config-Based Routing (Multiple Sources)
+
+For complex setups with multiple sources and per-destination configurations, use a `routes.yaml` config file:
+
+```bash
+# Generate example config
+telegram-cli forward-live --init-config
+
+# Run all routes from config
+telegram-cli forward-live --config routes.yaml
+
+# Run specific routes only
+telegram-cli forward-live --config routes.yaml --route news-backup --route crypto-signals
+
+# Run as daemon
+telegram-cli forward-live --config routes.yaml --daemon
+```
+
+**Example `routes.yaml`:**
+
+```yaml
+defaults:
+  drop_author: false
+  delete_after: false
+
+routes:
+  # Simple route: one source to multiple destinations
+  - name: "news-backup"
+    source: "@news_channel"
+    destinations:
+      - "@backup_channel"
+      - "@archive_channel"
+    drop_author: true
+
+  # Route with per-destination transforms
+  - name: "tech-filtered"
+    source: "@tech_channel"
+    destinations:
+      # Destination with transforms
+      - chat: "@general_backup"
+        transforms:
+          - replace_mentions:
+              replacement: "[user]"
+          - strip_formatting
+
+      # Destination with filters (media only)
+      - chat: "@media_archive"
+        filters:
+          media_only: true
+
+      # Simple destination
+      - "@raw_backup"
+
+  # Route with filters and transforms
+  - name: "crypto-signals"
+    source: "@crypto_source"
+    destinations:
+      - "@signals_group"
+    filters:
+      contains_any:
+        - "BUY"
+        - "SELL"
+    transforms:
+      - remove_links
+```
+
+**Config Features:**
+- Multiple source → destination mappings
+- Per-destination transforms and filters
+- Route-level defaults with per-destination overrides
+- Named routes for selective execution
+- Works with daemon mode and restore
+
+See `routes.example.yaml` for a complete example with all options.
+
 ### Delete Messages
 
 ```bash
 # Delete last 50 messages from a chat
-telegram-cli delete-last -c -100123456 --count 50
+telegram-cli delete-last -c @mychannel --count 50
 
 # Delete all messages from a chat
-telegram-cli delete-all -c -100123456
+telegram-cli delete-all -c @mychannel
 
 # Preview without deleting (dry run)
-telegram-cli delete-all -c -100123456 --dry-run
+telegram-cli delete-all -c @mychannel --dry-run
+
+# Using numeric ID
+telegram-cli delete-last -c -100123456 --count 50
 ```
 
 ### Resume Interrupted Jobs
@@ -343,10 +451,10 @@ telegram-cli status
 | `login` | Authenticate with Telegram |
 | `logout` | Clear session and log out |
 | `account` | Manage multiple Telegram accounts |
-| `list-chats` | List available chats with IDs |
+| `list-chats` | List available chats with IDs and @usernames |
 | `test` | Verify permissions for source/destination |
 | `forward-last` | Forward last X messages |
-| `forward-live` | Start real-time forwarding |
+| `forward-live` | Start real-time forwarding (supports `--config`) |
 | `forward-all` | Forward all messages in batches |
 | `delete-last` | Delete last X messages from a chat |
 | `delete-all` | Delete all messages from a chat |
@@ -356,6 +464,7 @@ telegram-cli status
 | `list` | List running background daemons |
 | `kill` | Kill a background daemon by PID |
 | `logs` | View daemon logs |
+| `restore` | Restore daemons after reboot |
 
 ### Global Flags
 
@@ -371,7 +480,7 @@ telegram-cli status
 | Flag | Description |
 |------|-------------|
 | `-s, --source` | Source chat ID or @username |
-| `-d, --dest` | Destination chat ID (repeatable) |
+| `-d, --dest` | Destination chat ID or @username (repeatable) |
 | `--drop-author` | Remove "Forwarded from" header |
 | `--delete` | Delete from source after forwarding |
 | `--dry-run` | Preview without executing |
@@ -381,6 +490,9 @@ telegram-cli status
 | `--transform` | Transform chain (forward-live only) |
 | `--transform-config` | Config for transform |
 | `--list-transforms` | List available transforms |
+| `--config` | Path to routes.yaml for multi-source routing |
+| `--route` | Run specific route(s) from config (repeatable) |
+| `--init-config` | Generate example routes.yaml |
 
 ### Filter Flags (for forward commands)
 
@@ -419,8 +531,11 @@ Run forwarding operations in the background. You can run multiple daemons simult
 
 ```bash
 # Run any forward command with --daemon
-telegram-cli forward-all -s -100123456 -d -100789012 --daemon
-telegram-cli forward-live -s -100123456 -d -100789012 --daemon
+telegram-cli forward-all -s @source -d @backup --daemon
+telegram-cli forward-live -s @source -d @backup --daemon
+
+# With config file
+telegram-cli forward-live --config routes.yaml --daemon
 ```
 
 Output:
@@ -430,6 +545,7 @@ PID: 12345
 Logs: telegram-cli logs 12345
 Kill: telegram-cli kill 12345
 List: telegram-cli list
+Restore after reboot: telegram-cli restore
 ```
 
 ### List Running Daemons
@@ -441,12 +557,12 @@ telegram-cli list
 Output:
 ```
 Running daemons (2):
-----------------------------------------------------------------------
-     PID  Command               Source        Started
-----------------------------------------------------------------------
-   12345  forward-all         -100123456  2026-02-02T14:30:00
-   12346  forward-live        -100789012  2026-02-02T15:00:00
-----------------------------------------------------------------------
+--------------------------------------------------------------------------------
+     PID  Command          Source               Started
+--------------------------------------------------------------------------------
+   12345  forward-all      @news_channel        2026-02-02T14:30:00
+   12346  forward-live     @tech_source         2026-02-02T15:00:00
+--------------------------------------------------------------------------------
 Kill with: telegram-cli kill <PID>
 View logs: telegram-cli logs <PID>
 ```
@@ -480,6 +596,35 @@ telegram-cli logs 12345 -f
 telegram-cli logs -n 100
 ```
 
+### Restore Daemons After Reboot
+
+Daemon configurations are saved automatically. After a system reboot, you can restore all previously running daemons:
+
+```bash
+# See what would be restored
+telegram-cli restore --dry-run
+
+# Restore all saved daemons
+telegram-cli restore
+```
+
+Output:
+```
+Found 2 daemon(s) to restore:
+----------------------------------------------------------------------
+  forward-live: @news_channel -> @backup_channel (account: personal)
+  forward-live: @tech_source -> @archive1, @archive2 (account: work)
+----------------------------------------------------------------------
+Restoring: forward-live (source: @news_channel)...
+    Started successfully
+Restoring: forward-live (source: @tech_source)...
+    Started successfully
+----------------------------------------------------------------------
+Restored: 2, Failed: 0
+```
+
+**Tip:** Add `telegram-cli restore` to your system startup scripts to auto-resume forwarding after reboots.
+
 ## Configuration
 
 Configuration is stored in `~/.telegram-cli/`:
@@ -494,9 +639,17 @@ Configuration is stored in `~/.telegram-cli/`:
 │   │   └── jobs.json
 │   └── work/
 │       └── ...
-├── daemons.json           # Running daemon processes
+├── daemons.json           # Running daemon processes (for restore)
 └── logs/                  # Log files (shared)
 ```
+
+**Routes configuration** is stored wherever you specify with `--config`:
+
+```
+./routes.yaml              # Your routing config (any location)
+```
+
+Generate an example with `telegram-cli forward-live --init-config`.
 
 **Note:** If upgrading from an older version, existing sessions are automatically migrated to the new multi-account structure.
 
