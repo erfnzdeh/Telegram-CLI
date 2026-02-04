@@ -201,7 +201,36 @@ Examples:
         'forward-live',
         help='Start real-time forwarding of new messages'
     )
-    _add_forward_args(forward_live_parser)
+    # For forward-live, source/dest are optional if --config is provided
+    forward_live_parser.add_argument(
+        '-s', '--source',
+        help='Source chat ID or @username (not required if using --config)'
+    )
+    forward_live_parser.add_argument(
+        '-d', '--dest',
+        action='append',
+        help='Destination chat ID or @username (not required if using --config)'
+    )
+    forward_live_parser.add_argument(
+        '--drop-author',
+        action='store_true',
+        help='Remove "Forwarded from" header'
+    )
+    forward_live_parser.add_argument(
+        '--delete',
+        action='store_true',
+        help='Delete from source after forwarding'
+    )
+    forward_live_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Preview without executing'
+    )
+    forward_live_parser.add_argument(
+        '--daemon',
+        action='store_true',
+        help='Run in background (daemon mode)'
+    )
     _add_filter_args(forward_live_parser)
     forward_live_parser.add_argument(
         '--transform',
@@ -215,6 +244,21 @@ Examples:
         '--list-transforms',
         action='store_true',
         help='List available transforms and exit'
+    )
+    forward_live_parser.add_argument(
+        '--config',
+        help='Path to routes.yaml config file for multi-source routing'
+    )
+    forward_live_parser.add_argument(
+        '--route',
+        action='append',
+        dest='routes',
+        help='Specific route name(s) to run from config (can be repeated; runs all if not specified)'
+    )
+    forward_live_parser.add_argument(
+        '--init-config',
+        action='store_true',
+        help='Generate an example routes.yaml config file and exit'
     )
     
     # Forward-all command
@@ -921,6 +965,21 @@ async def cmd_forward_live(
     state_manager: StateManager
 ):
     """Handle forward-live command."""
+    from .routes import load_routes, validate_routes, create_example_config
+    
+    # Handle --init-config
+    if getattr(args, 'init_config', False):
+        config_path = Path('routes.yaml')
+        if config_path.exists():
+            logger.error(f"Config file already exists: {config_path}")
+            logger.info("Remove it first or use a different name.")
+            return 1
+        
+        config_path.write_text(create_example_config())
+        logger.success(f"Created example config: {config_path}")
+        logger.info("Edit the file and run: telegram-cli forward-live --config routes.yaml")
+        return 0
+    
     # Handle --list-transforms
     if getattr(args, 'list_transforms', False):
         transforms = list_transforms()
@@ -932,6 +991,32 @@ async def cmd_forward_live(
         logger.info("Usage: --transform 'replace_mentions,strip_formatting'")
         logger.info("With config: --transform 'replace_mentions' --transform-config 'replacement=[removed]'")
         return 0
+    
+    # Check if using config mode or traditional mode
+    use_config = getattr(args, 'config', None) is not None
+    
+    if use_config:
+        # Config-based routing mode
+        return await _cmd_forward_live_config(args, config_manager, logger, state_manager)
+    else:
+        # Traditional single-source mode
+        return await _cmd_forward_live_single(args, config_manager, logger, state_manager)
+
+
+async def _cmd_forward_live_single(
+    args,
+    config_manager: ConfigManager,
+    logger: ForwarderLogger,
+    state_manager: StateManager
+):
+    """Handle forward-live command with traditional single-source mode."""
+    # Validate required arguments
+    if not args.source:
+        logger.error("Source (-s) is required. Use --config for multi-source routing.")
+        return 1
+    if not args.dest:
+        logger.error("Destination (-d) is required. Use --config for multi-source routing.")
+        return 1
     
     # Parse filters
     try:
@@ -1032,6 +1117,108 @@ async def cmd_forward_live(
         return 0
     except Exception as e:
         logger.error(f"Live forward failed: {e}")
+        return 1
+
+
+async def _cmd_forward_live_config(
+    args,
+    config_manager: ConfigManager,
+    logger: ForwarderLogger,
+    state_manager: StateManager
+):
+    """Handle forward-live command with config-based multi-source routing."""
+    from .routes import load_routes, validate_routes
+    
+    # Load config
+    try:
+        routes_config = load_routes(args.config)
+    except FileNotFoundError:
+        logger.error(f"Config file not found: {args.config}")
+        logger.info("Create one with: telegram-cli forward-live --init-config")
+        return 1
+    except Exception as e:
+        logger.error(f"Failed to load config: {e}")
+        return 1
+    
+    # Validate config
+    warnings = validate_routes(routes_config)
+    for warning in warnings:
+        logger.warning(f"Config warning: {warning}")
+    
+    # Get routes to run
+    route_names = getattr(args, 'routes', None)
+    routes = routes_config.get_routes(route_names)
+    
+    if not routes:
+        if route_names:
+            logger.error(f"No routes found matching: {route_names}")
+            logger.info(f"Available routes: {[r.name for r in routes_config.routes]}")
+        else:
+            logger.error("No routes defined in config")
+        return 1
+    
+    logger.info(f"Loading {len(routes)} route(s) from {args.config}")
+    for route in routes:
+        dest_names = [d.chat for d in route.destinations]
+        logger.info(f"  - {route.name}: {route.source} -> {', '.join(dest_names)}")
+    
+    wrapper = ClientWrapper(config_manager, logger)
+    
+    try:
+        is_authorized = await wrapper.connect()
+        if not is_authorized:
+            logger.error("Not logged in. Run 'telegram-cli login' first.")
+            return 1
+        
+        # Resolve all chat IDs from routes
+        logger.info("Resolving chat IDs...")
+        resolved_routes = []
+        
+        for route in routes:
+            try:
+                # Resolve source
+                source_id = await resolve_chat_id(wrapper.client, route.source)
+                logger.verbose(f"  {route.source} -> {source_id}")
+                
+                # Resolve destinations
+                resolved_dests = []
+                for dest in route.destinations:
+                    dest_id = await resolve_chat_id(wrapper.client, dest.chat)
+                    logger.verbose(f"  {dest.chat} -> {dest_id}")
+                    resolved_dests.append((dest_id, dest))
+                
+                resolved_routes.append((route, source_id, resolved_dests))
+                
+            except ValueError as e:
+                logger.error(f"Failed to resolve route '{route.name}': {e}")
+                return 1
+        
+        # Create forwarder
+        forwarder = Forwarder(
+            client=wrapper.client,
+            logger=logger,
+            state=state_manager,
+            shutdown=None,
+        )
+        
+        # Start multi-source live forwarding
+        await forwarder.start_live_forward_multi(
+            resolved_routes=resolved_routes,
+            logger=logger,
+        )
+        
+        await wrapper.disconnect()
+        return 0
+        
+    except AccountLimitedError as e:
+        logger.error(str(e))
+        return 1
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        logger.error(f"Live forward failed: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 

@@ -767,6 +767,190 @@ class Forwarder:
             self.client.remove_event_handler(self._live_handler)
             self._live_handler = None
     
+    async def start_live_forward_multi(
+        self,
+        resolved_routes: list,
+        logger,
+    ):
+        """Start real-time forwarding for multiple sources with per-destination config.
+        
+        Args:
+            resolved_routes: List of (RouteConfig, source_id, [(dest_id, DestinationConfig), ...])
+            logger: Logger instance
+        """
+        from datetime import datetime
+        from .utils import is_forwardable, detect_message_type
+        
+        # Collect all source IDs for the event handler
+        source_ids = [source_id for (route, source_id, _) in resolved_routes]
+        
+        # Build lookup: source_id -> (route, [(dest_id, dest_config), ...])
+        source_config_map = {}
+        for route, source_id, resolved_dests in resolved_routes:
+            source_config_map[source_id] = (route, resolved_dests)
+        
+        logger.info(f"Starting multi-source live forwarding ({len(resolved_routes)} routes)")
+        logger.info("Waiting for new messages... (Ctrl+C to stop)")
+        logger.info("-" * 60)
+        
+        # Track stats per route
+        stats = {route.name: {"forwarded": 0, "skipped": 0, "failed": 0} 
+                 for (route, _, _) in resolved_routes}
+        
+        @self.client.on(events.NewMessage(chats=source_ids))
+        async def multi_handler(event):
+            message = event.message
+            source_id = event.chat_id
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
+            # Get config for this source
+            if source_id not in source_config_map:
+                return
+            
+            route, resolved_dests = source_config_map[source_id]
+            route_stats = stats[route.name]
+            
+            # Check if message is forwardable
+            forwardable, reason = is_forwardable(message)
+            if not forwardable:
+                route_stats["skipped"] += 1
+                logger.verbose(f"[{timestamp}] [{route.name}] Skip: {reason}")
+                return
+            
+            # Apply route-level filter
+            if route.filters:
+                matches, filter_reason = route.filters.matches(message)
+                if not matches:
+                    route_stats["skipped"] += 1
+                    logger.verbose(f"[{timestamp}] [{route.name}] Filter: {filter_reason}")
+                    return
+            
+            try:
+                # Get message preview for logging
+                text_preview = ""
+                if message.text:
+                    text_preview = message.text[:40].replace('\n', ' ')
+                    if len(message.text) > 40:
+                        text_preview += "..."
+                elif message.media:
+                    msg_type = detect_message_type(message)
+                    text_preview = f"[{msg_type.value}]"
+                
+                # Process each destination with its own config
+                success_count = 0
+                for dest_id, dest_config in resolved_dests:
+                    try:
+                        # Apply destination-level filter (if any)
+                        if dest_config.filters:
+                            matches, filter_reason = dest_config.filters.matches(message)
+                            if not matches:
+                                logger.verbose(f"[{timestamp}] [{route.name}] -> {dest_id}: Filter: {filter_reason}")
+                                continue
+                        
+                        # Determine which transform chain to use
+                        # Destination-level overrides route-level
+                        transform_chain = dest_config.transforms or route.transforms
+                        
+                        if transform_chain:
+                            # Send with transforms
+                            await self._send_transformed_to_single(
+                                message=message,
+                                dest_id=dest_id,
+                                transform_chain=transform_chain,
+                            )
+                        else:
+                            # Standard forward
+                            await self.client.forward_messages(
+                                dest_id,
+                                message,
+                                drop_author=route.drop_author,
+                            )
+                        
+                        success_count += 1
+                        
+                    except errors.ChatWriteForbiddenError:
+                        logger.warning(f"[{route.name}] Cannot write to {dest_id}")
+                    except errors.ChannelPrivateError:
+                        logger.warning(f"[{route.name}] Channel {dest_id} is private")
+                    except Exception as e:
+                        logger.error(f"[{route.name}] Failed to forward to {dest_id}: {e}")
+                    
+                    # Small delay between destinations
+                    if len(resolved_dests) > 1:
+                        await asyncio.sleep(0.3)
+                
+                if success_count > 0:
+                    route_stats["forwarded"] += 1
+                    logger.info(f"[{timestamp}] [{route.name}] #{message.id}: {text_preview}")
+                    
+                    # Delete from source if requested and all destinations succeeded
+                    if route.delete_after and success_count == len(resolved_dests):
+                        await self._safe_delete_batch([message], source_id)
+                else:
+                    route_stats["failed"] += 1
+                    
+            except AccountLimitedError as e:
+                logger.error(f"Account limited! Stopping: {e}")
+                await self.client.disconnect()
+            except Exception as e:
+                route_stats["failed"] += 1
+                logger.error(f"[{timestamp}] [{route.name}] Error: {e}")
+        
+        self._live_handler = multi_handler
+        
+        # Run until disconnected
+        try:
+            await self.client.run_until_disconnected()
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        finally:
+            # Clean up handler
+            if self._live_handler:
+                self.client.remove_event_handler(self._live_handler)
+                self._live_handler = None
+            
+            # Show final stats
+            logger.info("-" * 60)
+            logger.info("Final stats by route:")
+            for route_name, route_stats in stats.items():
+                logger.info(
+                    f"  {route_name}: "
+                    f"Forwarded: {route_stats['forwarded']}, "
+                    f"Skipped: {route_stats['skipped']}, "
+                    f"Failed: {route_stats['failed']}"
+                )
+    
+    async def _send_transformed_to_single(
+        self,
+        message: Message,
+        dest_id: int,
+        transform_chain,
+    ):
+        """Send a message with transformed text to a single destination.
+        
+        Args:
+            message: Original message
+            dest_id: Destination chat ID
+            transform_chain: Transform chain to apply
+        """
+        # Get original text and apply transforms
+        original_text = message.text or message.message or ''
+        transformed_text = transform_chain.apply(original_text) if original_text else ''
+        
+        if message.media:
+            # Message has media - send with media
+            await self.client.send_file(
+                dest_id,
+                message.media,
+                caption=transformed_text,
+            )
+        else:
+            # Text-only message
+            await self.client.send_message(
+                dest_id,
+                transformed_text,
+            )
+    
     async def delete_last(
         self,
         chat_id: int,

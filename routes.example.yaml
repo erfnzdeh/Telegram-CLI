@@ -1,0 +1,94 @@
+# Telegram Forwarder Routes Configuration
+# Copy this file to routes.yaml and customize for your needs
+# Usage: telegram-cli forward-live --config routes.yaml
+
+# Global defaults (can be overridden per-route)
+defaults:
+  drop_author: false
+  delete_after: false
+
+routes:
+  # Simple route: one source to multiple destinations
+  - name: "news-backup"
+    source: "@news_channel"
+    destinations:
+      - "@backup_channel"
+      - "@archive_channel"
+    drop_author: true
+  
+  # Route with per-destination transforms
+  - name: "tech-filtered"
+    source: "@tech_channel"
+    destinations:
+      # Destination with transforms
+      - chat: "@general_backup"
+        transforms:
+          - replace_mentions:
+              replacement: "[user]"
+          - strip_formatting
+      
+      # Destination with filters (media only)
+      - chat: "@media_archive"
+        filters:
+          media_only: true
+      
+      # Simple destination (no transforms or filters)
+      - "@raw_backup"
+  
+  # Route with route-level filters (applied to all destinations)
+  - name: "crypto-signals"
+    source: "@crypto_source"
+    destinations:
+      - "@signals_group"
+    filters:
+      contains_any:
+        - "BUY"
+        - "SELL"
+    transforms:
+      - remove_links
+  
+  # Route with regex filtering
+  - name: "important-only"
+    source: "@announcements"
+    destinations:
+      - chat: "@important_backup"
+        filters:
+          regex: "(?i)(urgent|important|breaking)"
+    drop_author: true
+
+# Available transforms:
+#   - replace_mentions: Remove or replace @mentions
+#       replacement: Text to replace with (default: "")
+#   - remove_links: Remove URLs
+#       replacement: Text to replace with (default: "")
+#   - remove_hashtags: Remove #hashtags
+#       replacement: Text to replace with (default: "")
+#   - strip_formatting: Clean up extra whitespace
+#   - add_prefix: Add text at the beginning
+#       prefix: Text to add
+#   - add_suffix: Add text at the end
+#       suffix: Text to add
+#   - regex_replace: Custom regex replacement
+#       pattern: Regex pattern
+#       replacement: Replacement text
+#       flags: Regex flags (i=case-insensitive, m=multiline, s=dotall)
+
+# Available filters:
+#   types: [photo, video, text, document, audio, voice, sticker, ...]
+#   exclude_types: [...]
+#   after: Date or relative (7d, 1w, 1m)
+#   before: Date or relative
+#   contains: Must contain all these words
+#   contains_any: Must contain any of these words
+#   excludes: Must NOT contain these words
+#   regex: Must match this pattern
+#   media_only: true/false
+#   text_only: true/false
+#   min_size: "1MB"
+#   max_size: "100MB"
+#   no_replies: true
+#   replies_only: true
+#   no_forwards: true
+#   forwards_only: true
+#   no_links: true
+#   links_only: true
