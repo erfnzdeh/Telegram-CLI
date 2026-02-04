@@ -1921,6 +1921,14 @@ def _extract_daemon_args(args) -> Dict[str, Any]:
     """
     daemon_args = {}
     
+    # Config file (convert to absolute path since daemon changes cwd to /)
+    if hasattr(args, 'config') and args.config:
+        daemon_args['config'] = str(Path(args.config).resolve())
+    
+    # Route names from config
+    if hasattr(args, 'routes') and args.routes:
+        daemon_args['routes'] = args.routes
+    
     # Core forwarding args
     if hasattr(args, 'source') and args.source:
         daemon_args['source'] = args.source
@@ -1982,18 +1990,26 @@ def _build_restore_command(cfg, telegram_cli: Optional[str] = None) -> Optional[
     # Add the command (e.g., forward-live)
     cmd.append(cfg.command)
     
-    # Add source (required)
-    source = args.get('source') or cfg.source
-    if not source:
-        return None
-    cmd.extend(['-s', str(source)])
-    
-    # Add destinations (required)
-    dest = args.get('dest') or cfg.dest
-    if not dest:
-        return None
-    for d in dest:
-        cmd.extend(['-d', str(d)])
+    # Check if using config-based routing
+    if args.get('config'):
+        cmd.extend(['--config', args['config']])
+        # Add route names if specified
+        if args.get('routes'):
+            for route in args['routes']:
+                cmd.extend(['--route', route])
+    else:
+        # Traditional mode: Add source (required)
+        source = args.get('source') or cfg.source
+        if not source:
+            return None
+        cmd.extend(['-s', str(source)])
+        
+        # Add destinations (required)
+        dest = args.get('dest') or cfg.dest
+        if not dest:
+            return None
+        for d in dest:
+            cmd.extend(['-d', str(d)])
     
     # Add optional flags
     if args.get('drop_author'):
@@ -2140,6 +2156,10 @@ def main():
         account = getattr(args, 'account', None)
         config_manager = get_config_manager(account=account)
         daemon_manager = get_daemon_manager(config_manager.config_dir)
+        
+        # Convert config path to absolute BEFORE daemonizing (daemon changes cwd to /)
+        if hasattr(args, 'config') and args.config:
+            args.config = str(Path(args.config).resolve())
         
         # Get source/dest for tracking (keep original values, may be usernames)
         source = None
