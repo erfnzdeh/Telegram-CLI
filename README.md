@@ -1,4 +1,4 @@
-# Telegram Automations CLI
+# Telegram CLI
 
 A command-line tool for automating Telegram message forwarding using Telethon.
 

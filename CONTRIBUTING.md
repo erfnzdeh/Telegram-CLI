@@ -1,4 +1,4 @@
-# Contributing to Telegram CLI Forwarder
+# Contributing to Telegram CLI
 
 Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
 
