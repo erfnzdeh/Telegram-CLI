@@ -315,3 +315,48 @@ async def get_client(
         await wrapper.connect()
     
     return wrapper
+
+
+async def resolve_chat_id(client: TelegramClient, chat_ref: str) -> int:
+    """Resolve a chat reference (username or ID) to a numerical chat ID.
+    
+    This uses Telethon's get_peer_id to get the properly formatted ID
+    (with -100 prefix for channels, - prefix for groups, etc.)
+    
+    Args:
+        client: Connected Telethon client
+        chat_ref: Chat reference - can be:
+            - Numerical ID as string (e.g., "-1001234567890")
+            - Username with @ (e.g., "@channelname")
+            - Username without @ (e.g., "channelname")
+            
+    Returns:
+        Numerical chat ID (properly formatted with prefixes)
+        
+    Raises:
+        ValueError: If chat cannot be resolved
+    """
+    from telethon import utils
+    
+    # If it's already a valid integer, return it
+    try:
+        return int(chat_ref)
+    except ValueError:
+        pass
+    
+    # Normalize username format
+    if not chat_ref.startswith('@'):
+        chat_ref = f"@{chat_ref}"
+    
+    try:
+        # Get the entity to resolve the username
+        entity = await client.get_entity(chat_ref)
+        
+        # Use Telethon's utility to get the properly formatted peer ID
+        # This handles the -100 prefix for channels, etc.
+        peer_id = utils.get_peer_id(entity)
+        
+        return peer_id
+        
+    except Exception as e:
+        raise ValueError(f"Cannot resolve chat '{chat_ref}': {e}")

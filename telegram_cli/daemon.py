@@ -7,7 +7,7 @@ import signal
 import atexit
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 
 class DaemonProcess:
@@ -17,8 +17,8 @@ class DaemonProcess:
         self,
         pid: int,
         command: str,
-        source: Optional[int] = None,
-        dest: Optional[List[int]] = None,
+        source: Optional[Union[int, str]] = None,
+        dest: Optional[List[Union[int, str]]] = None,
         started_at: Optional[str] = None,
         log_file: Optional[str] = None,
         args: Optional[Dict[str, Any]] = None,
@@ -26,8 +26,8 @@ class DaemonProcess:
     ):
         self.pid = pid
         self.command = command
-        self.source = source
-        self.dest = dest or []
+        self.source = source  # Can be numeric ID or @username
+        self.dest = dest or []  # Can contain numeric IDs or @usernames
         self.started_at = started_at or datetime.now().isoformat()
         self.log_file = log_file
         self.args = args or {}  # Full args for restart capability
@@ -134,8 +134,8 @@ class DaemonManager:
     def daemonize(
         self,
         command: str,
-        source: Optional[int] = None,
-        dest: Optional[List[int]] = None,
+        source: Optional[Union[int, str]] = None,
+        dest: Optional[List[Union[int, str]]] = None,
         args: Optional[Dict[str, Any]] = None,
         account: Optional[str] = None
     ) -> int:
@@ -143,8 +143,8 @@ class DaemonManager:
         
         Args:
             command: Command being run (for display)
-            source: Source chat ID
-            dest: Destination chat IDs
+            source: Source chat ID or @username
+            dest: Destination chat IDs or @usernames
             
         Returns:
             PID of the daemon (in parent), doesn't return in child
@@ -207,8 +207,8 @@ class DaemonManager:
     def _register_daemon(
         self,
         command: str,
-        source: Optional[int],
-        dest: Optional[List[int]],
+        source: Optional[Union[int, str]],
+        dest: Optional[List[Union[int, str]]],
         log_file: str,
         args: Optional[Dict[str, Any]] = None,
         account: Optional[str] = None
@@ -352,8 +352,8 @@ class DaemonManager:
     def save_config_for_restore(
         self,
         command: str,
-        source: Optional[int],
-        dest: Optional[List[int]],
+        source: Optional[Union[int, str]],
+        dest: Optional[List[Union[int, str]]],
         args: Dict[str, Any],
         account: Optional[str] = None
     ):

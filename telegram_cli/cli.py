@@ -6,12 +6,12 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 from .config import ConfigManager, get_config_manager
 from .logger import ForwarderLogger, get_logger
 from .state import StateManager, JobType, JobStatus, get_state_manager
-from .client import ClientWrapper, get_client
+from .client import ClientWrapper, get_client, resolve_chat_id
 from .forwarder import Forwarder, test_permissions
 from .daemon import DaemonManager, get_daemon_manager
 from .errors import (
@@ -22,6 +22,50 @@ from .errors import (
     create_shutdown_handler,
 )
 from .utils import validate_chat_id
+
+
+async def resolve_chat_ids(
+    client,
+    source: str,
+    destinations: List[str],
+    logger: ForwarderLogger
+) -> Tuple[int, List[int]]:
+    """Resolve source and destination chat IDs from usernames or IDs.
+    
+    Args:
+        client: Connected Telethon client
+        source: Source chat reference (@username or numeric ID)
+        destinations: List of destination chat references
+        logger: Logger for status messages
+        
+    Returns:
+        Tuple of (source_id, dest_ids)
+        
+    Raises:
+        ValueError: If any chat cannot be resolved
+    """
+    # Resolve source
+    source_str = str(source)
+    if source_str.startswith('@') or (not source_str.lstrip('-').isdigit()):
+        logger.verbose(f"Resolving source: {source_str}")
+        source_id = await resolve_chat_id(client, source_str)
+        logger.verbose(f"  -> {source_id}")
+    else:
+        source_id = int(source_str)
+    
+    # Resolve destinations
+    dest_ids = []
+    for dest in destinations:
+        dest_str = str(dest)
+        if dest_str.startswith('@') or (not dest_str.lstrip('-').isdigit()):
+            logger.verbose(f"Resolving destination: {dest_str}")
+            dest_id = await resolve_chat_id(client, dest_str)
+            logger.verbose(f"  -> {dest_id}")
+            dest_ids.append(dest_id)
+        else:
+            dest_ids.append(int(dest_str))
+    
+    return source_id, dest_ids
 from .transforms import list_transforms, create_chain_from_spec
 from .filters import MessageFilter, create_filter_from_args
 
@@ -40,17 +84,20 @@ Examples:
   # List chats to get IDs
   telegram-forwarder list-chats
 
-  # Forward last 50 messages
+  # Forward last 50 messages (using numeric IDs)
   telegram-forwarder forward-last -s -100123456 -d -100789012 --count 50
 
+  # Forward using @username (resolved from chat list)
+  telegram-forwarder forward-last -s @source_channel -d @dest_channel --count 50
+
   # Forward without "Forwarded from" header
-  telegram-forwarder forward-last -s -100123456 -d -100789012 --count 50 --drop-author
+  telegram-forwarder forward-last -s @mychannel -d @backup --count 50 --drop-author
 
   # Forward all messages in batches
-  telegram-forwarder forward-all -s -100123456 -d -100789012 --drop-author
+  telegram-forwarder forward-all -s @source -d @dest1 -d @dest2 --drop-author
 
   # Real-time forwarding
-  telegram-forwarder forward-live -s -100123456 -d -100789012
+  telegram-forwarder forward-live -s @source_channel -d @dest_channel
 """
     )
     
@@ -121,13 +168,13 @@ Examples:
     test_parser.add_argument(
         '-s', '--source',
         required=True,
-        help='Source chat ID or username'
+        help='Source chat ID or @username (e.g., -100123456 or @channelname)'
     )
     test_parser.add_argument(
         '-d', '--dest',
         action='append',
         required=True,
-        help='Destination chat ID (can be repeated for multiple destinations)'
+        help='Destination chat ID or @username (can be repeated for multiple destinations)'
     )
     test_parser.add_argument(
         '--delete',
@@ -346,13 +393,13 @@ def _add_forward_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         '-s', '--source',
         required=True,
-        help='Source chat ID or username'
+        help='Source chat ID or @username (e.g., -100123456 or @channelname)'
     )
     parser.add_argument(
         '-d', '--dest',
         action='append',
         required=True,
-        help='Destination chat ID (can be repeated for multiple destinations)'
+        help='Destination chat ID or @username (can be repeated for multiple destinations)'
     )
     parser.add_argument(
         '--drop-author',
@@ -621,9 +668,14 @@ async def cmd_test(args, config_manager: ConfigManager, logger: ForwarderLogger)
             logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
-        # Parse chat IDs
-        source_id = validate_chat_id(args.source)
-        dest_ids = [validate_chat_id(d) for d in args.dest]
+        # Resolve chat IDs (supports @username format)
+        try:
+            source_id, dest_ids = await resolve_chat_ids(
+                wrapper.client, args.source, args.dest, logger
+            )
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
         
         logger.info("Testing permissions...")
         logger.info("-" * 60)
@@ -681,9 +733,14 @@ async def cmd_forward_last(
             logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
-        # Parse chat IDs
-        source_id = validate_chat_id(args.source)
-        dest_ids = [validate_chat_id(d) for d in args.dest]
+        # Resolve chat IDs (supports @username format)
+        try:
+            source_id, dest_ids = await resolve_chat_ids(
+                wrapper.client, args.source, args.dest, logger
+            )
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
         
         # Create shutdown handler
         shutdown = create_shutdown_handler(state_manager, logger)
@@ -779,9 +836,14 @@ async def cmd_forward_all(
             logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
-        # Parse chat IDs
-        source_id = validate_chat_id(args.source)
-        dest_ids = [validate_chat_id(d) for d in args.dest]
+        # Resolve chat IDs (supports @username format)
+        try:
+            source_id, dest_ids = await resolve_chat_ids(
+                wrapper.client, args.source, args.dest, logger
+            )
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
         
         # Create shutdown handler
         shutdown = create_shutdown_handler(state_manager, logger)
@@ -907,9 +969,14 @@ async def cmd_forward_live(
             logger.error("Not logged in. Run 'telegram-cli login' first.")
             return 1
         
-        # Parse chat IDs
-        source_id = validate_chat_id(args.source)
-        dest_ids = [validate_chat_id(d) for d in args.dest]
+        # Resolve chat IDs (supports @username format)
+        try:
+            source_id, dest_ids = await resolve_chat_ids(
+                wrapper.client, args.source, args.dest, logger
+            )
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
         
         # Create forwarder (no shutdown handler for live - it handles its own signals)
         forwarder = Forwarder(
@@ -1469,16 +1536,20 @@ def cmd_list_daemons(config_manager: ConfigManager) -> int:
         return 0
     
     print(f"Running daemons ({len(processes)}):")
-    print("-" * 70)
-    print(f"{'PID':>8}  {'Command':<20}  {'Source':>12}  {'Started'}")
-    print("-" * 70)
+    print("-" * 80)
+    print(f"{'PID':>8}  {'Command':<15}  {'Source':<20}  {'Started'}")
+    print("-" * 80)
     
     for proc in processes:
+        # Source can be int or @username
         source = str(proc.source) if proc.source else "-"
+        # Truncate long usernames for display
+        if len(source) > 18:
+            source = source[:15] + "..."
         started = proc.started_at[:19] if proc.started_at else "-"
-        print(f"{proc.pid:>8}  {proc.command:<20}  {source:>12}  {started}")
+        print(f"{proc.pid:>8}  {proc.command:<15}  {source:<20}  {started}")
     
-    print("-" * 70)
+    print("-" * 80)
     print(f"Kill with: telegram-cli kill <PID>")
     print(f"View logs: telegram-cli logs <PID>")
     
@@ -1883,21 +1954,15 @@ def main():
         config_manager = get_config_manager(account=account)
         daemon_manager = get_daemon_manager(config_manager.config_dir)
         
-        # Get source/dest for tracking
+        # Get source/dest for tracking (keep original values, may be usernames)
         source = None
         dest = None
-        if hasattr(args, 'source'):
-            try:
-                source = int(args.source) if args.source else None
-            except ValueError:
-                source = None
-        if hasattr(args, 'dest'):
-            dest = []
-            for d in (args.dest or []):
-                try:
-                    dest.append(int(d))
-                except ValueError:
-                    pass
+        if hasattr(args, 'source') and args.source:
+            # Store the original value (could be @username or numeric ID)
+            source = args.source
+        if hasattr(args, 'dest') and args.dest:
+            # Store the original values
+            dest = args.dest
         
         # Extract full args for restore capability
         daemon_args = _extract_daemon_args(args)
