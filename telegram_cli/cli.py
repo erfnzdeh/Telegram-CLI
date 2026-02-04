@@ -6,7 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from .config import ConfigManager, get_config_manager
 from .logger import ForwarderLogger, get_logger
@@ -325,6 +325,17 @@ Examples:
         '-f', '--follow',
         action='store_true',
         help='Follow log output (like tail -f)'
+    )
+    
+    # Restore command (restart saved daemons after reboot)
+    restore_parser = subparsers.add_parser(
+        'restore',
+        help='Restore daemons after reboot (re-launch saved daemon configurations)'
+    )
+    restore_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Show what would be restored without actually starting daemons'
     )
     
     return parser
@@ -900,62 +911,56 @@ async def cmd_forward_live(
         source_id = validate_chat_id(args.source)
         dest_ids = [validate_chat_id(d) for d in args.dest]
         
-        # Create shutdown handler
-        shutdown = create_shutdown_handler(state_manager, logger)
+        # Create forwarder (no shutdown handler for live - it handles its own signals)
+        forwarder = Forwarder(
+            client=wrapper.client,
+            logger=logger,
+            state=state_manager,
+            shutdown=None,
+        )
         
-        try:
-            # Create forwarder
-            forwarder = Forwarder(
-                client=wrapper.client,
-                logger=logger,
-                state=state_manager,
-                shutdown=shutdown,
-            )
-            
-            # Verify operation (no confirmation for live, just check permissions)
-            proceed = await forwarder.verify_operation(
-                source_id=source_id,
-                dest_ids=dest_ids,
-                drop_author=args.drop_author,
-                delete_after=args.delete,
-                skip_confirm=True,
-            )
-            if not proceed:
-                return 1
-            
-            # Create job
-            job = state_manager.create_job(
-                job_type=JobType.FORWARD_LIVE,
-                source=source_id,
-                destinations=dest_ids,
-                drop_author=args.drop_author,
-                delete_after=args.delete,
-            )
-            
-            logger.info(f"Job ID: {job.job_id}")
-            
-            # Start live forwarding
-            await forwarder.start_live_forward(
-                source_id=source_id,
-                dest_ids=dest_ids,
-                drop_author=args.drop_author,
-                delete_after=args.delete,
-                transform_chain=transform_chain,
-                msg_filter=msg_filter if not msg_filter.is_empty() else None,
-            )
-            
-            state_manager.mark_completed()
-            return 0
-            
-        finally:
-            shutdown.cleanup()
+        # Verify operation (no confirmation for live, just check permissions)
+        proceed = await forwarder.verify_operation(
+            source_id=source_id,
+            dest_ids=dest_ids,
+            drop_author=args.drop_author,
+            delete_after=args.delete,
+            skip_confirm=True,
+        )
+        if not proceed:
+            return 1
+        
+        # Create job
+        job = state_manager.create_job(
+            job_type=JobType.FORWARD_LIVE,
+            source=source_id,
+            destinations=dest_ids,
+            drop_author=args.drop_author,
+            delete_after=args.delete,
+        )
+        
+        logger.info(f"Job ID: {job.job_id}")
+        
+        # Start live forwarding
+        await forwarder.start_live_forward(
+            source_id=source_id,
+            dest_ids=dest_ids,
+            drop_author=args.drop_author,
+            delete_after=args.delete,
+            transform_chain=transform_chain,
+            msg_filter=msg_filter if not msg_filter.is_empty() else None,
+        )
+        
+        state_manager.mark_completed()
+        await wrapper.disconnect()
+        return 0
         
     except AccountLimitedError as e:
         logger.error(str(e))
         state_manager.mark_failed(str(e))
         return 1
     except KeyboardInterrupt:
-        logger.info("Stopped by user")
+        # Clean shutdown on Ctrl+C
         state_manager.mark_completed()
         return 0
     except Exception as e:
@@ -1555,6 +1560,246 @@ def cmd_logs(args, config_manager: ConfigManager) -> int:
         return 0
 
 
+def cmd_restore(args, config_manager: ConfigManager) -> int:
+    """Handle restore command - restart saved daemons after reboot."""
+    import subprocess
+    import shutil
+    
+    daemon_manager = get_daemon_manager(config_manager.config_dir)
+    
+    # Get saved configs (that have args for restart)
+    saved_configs = daemon_manager.get_saved_configs()
+    
+    # Filter to only non-running ones
+    configs_to_restore = [
+        cfg for cfg in saved_configs 
+        if not cfg.is_running()
+    ]
+    
+    if not configs_to_restore:
+        # Check if there are running daemons
+        running = daemon_manager.list_running()
+        if running:
+            print(f"All {len(running)} saved daemons are already running.")
+        else:
+            print("No saved daemon configurations to restore.")
+            print("Start daemons with: telegram-cli forward-live -s SOURCE -d DEST --daemon")
+        return 0
+    
+    print(f"Found {len(configs_to_restore)} daemon(s) to restore:")
+    print("-" * 70)
+    
+    for cfg in configs_to_restore:
+        source = cfg.source or cfg.args.get('source', '?')
+        dest = cfg.dest or cfg.args.get('dest', [])
+        dest_str = ', '.join(map(str, dest)) if dest else '?'
+        account = cfg.account or 'default'
+        print(f"  {cfg.command}: {source} -> {dest_str} (account: {account})")
+    
+    print("-" * 70)
+    
+    if args.dry_run:
+        print("[DRY RUN] Would restore the above daemons.")
+        return 0
+    
+    # Find the telegram-cli executable
+    telegram_cli = shutil.which('telegram-cli')
+    if not telegram_cli:
+        # Try python -m telegram_cli
+        telegram_cli = None
+    
+    restored = 0
+    failed = 0
+    
+    for cfg in configs_to_restore:
+        try:
+            # Build command line from saved args
+            cmd = _build_restore_command(cfg, telegram_cli)
+            
+            if not cmd:
+                print(f"  Cannot restore {cfg.command}: missing required args")
+                failed += 1
+                continue
+            
+            print(f"  Restoring: {cfg.command} (source: {cfg.source})...")
+            
+            # Run the command (it will daemonize itself)
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                restored += 1
+                print(f"    Started successfully")
+            else:
+                failed += 1
+                error = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                print(f"    Failed: {error[:100]}")
+                
+        except subprocess.TimeoutExpired:
+            failed += 1
+            print(f"    Timeout starting daemon")
+        except Exception as e:
+            failed += 1
+            print(f"    Error: {e}")
+    
+    print("-" * 70)
+    print(f"Restored: {restored}, Failed: {failed}")
+    
+    return 0 if failed == 0 else 1
+
+
+def _extract_daemon_args(args) -> Dict[str, Any]:
+    """Extract relevant arguments from argparse Namespace for daemon restore.
+    
+    Args:
+        args: argparse.Namespace object
+        
+    Returns:
+        Dictionary of args that can be used to restore the daemon
+    """
+    daemon_args = {}
+    
+    # Core forwarding args
+    if hasattr(args, 'source') and args.source:
+        daemon_args['source'] = args.source
+    if hasattr(args, 'dest') and args.dest:
+        daemon_args['dest'] = args.dest
+    if hasattr(args, 'drop_author'):
+        daemon_args['drop_author'] = args.drop_author
+    if hasattr(args, 'delete'):
+        daemon_args['delete'] = args.delete
+    
+    # Transform args
+    if hasattr(args, 'transform') and args.transform:
+        daemon_args['transform'] = args.transform
+    if hasattr(args, 'transform_config') and args.transform_config:
+        daemon_args['transform_config'] = args.transform_config
+    
+    # Filter args
+    filter_attrs = [
+        'type', 'exclude_type', 'after', 'before',
+        'contains', 'contains_any', 'excludes', 'regex',
+        'media_only', 'text_only', 'min_size', 'max_size',
+        'no_replies', 'replies_only', 'no_forwards', 'forwards_only',
+        'no_links', 'links_only'
+    ]
+    
+    for attr in filter_attrs:
+        if hasattr(args, attr):
+            value = getattr(args, attr)
+            if value:  # Only include non-empty/non-False values
+                daemon_args[attr] = value
+    
+    return daemon_args
+
+
+def _build_restore_command(cfg, telegram_cli: Optional[str] = None) -> Optional[List[str]]:
+    """Build command line to restore a daemon from saved config.
+    
+    Args:
+        cfg: DaemonProcess with saved args
+        telegram_cli: Path to telegram-cli executable (or None to use python -m)
+        
+    Returns:
+        Command line as list, or None if cannot build
+    """
+    args = cfg.args
+    if not args:
+        return None
+    
+    # Base command
+    if telegram_cli:
+        cmd = [telegram_cli]
+    else:
+        cmd = [sys.executable, '-m', 'telegram_cli']
+    
+    # Add account if specified
+    if cfg.account:
+        cmd.extend(['-a', cfg.account])
+    
+    # Add the command (e.g., forward-live)
+    cmd.append(cfg.command)
+    
+    # Add source (required)
+    source = args.get('source') or cfg.source
+    if not source:
+        return None
+    cmd.extend(['-s', str(source)])
+    
+    # Add destinations (required)
+    dest = args.get('dest') or cfg.dest
+    if not dest:
+        return None
+    for d in dest:
+        cmd.extend(['-d', str(d)])
+    
+    # Add optional flags
+    if args.get('drop_author'):
+        cmd.append('--drop-author')
+    
+    if args.get('delete'):
+        cmd.append('--delete')
+    
+    if args.get('transform'):
+        cmd.extend(['--transform', args['transform']])
+    
+    if args.get('transform_config'):
+        cmd.extend(['--transform-config', args['transform_config']])
+    
+    # Add filter args
+    if args.get('type'):
+        cmd.extend(['--type', args['type']])
+    if args.get('exclude_type'):
+        cmd.extend(['--exclude-type', args['exclude_type']])
+    if args.get('after'):
+        cmd.extend(['--after', args['after']])
+    if args.get('before'):
+        cmd.extend(['--before', args['before']])
+    if args.get('contains'):
+        for c in args['contains']:
+            cmd.extend(['--contains', c])
+    if args.get('contains_any'):
+        for c in args['contains_any']:
+            cmd.extend(['--contains-any', c])
+    if args.get('excludes'):
+        for e in args['excludes']:
+            cmd.extend(['--excludes', e])
+    if args.get('regex'):
+        cmd.extend(['--regex', args['regex']])
+    if args.get('media_only'):
+        cmd.append('--media-only')
+    if args.get('text_only'):
+        cmd.append('--text-only')
+    if args.get('min_size'):
+        cmd.extend(['--min-size', args['min_size']])
+    if args.get('max_size'):
+        cmd.extend(['--max-size', args['max_size']])
+    if args.get('no_replies'):
+        cmd.append('--no-replies')
+    if args.get('replies_only'):
+        cmd.append('--replies-only')
+    if args.get('no_forwards'):
+        cmd.append('--no-forwards')
+    if args.get('forwards_only'):
+        cmd.append('--forwards-only')
+    if args.get('no_links'):
+        cmd.append('--no-links')
+    if args.get('links_only'):
+        cmd.append('--links-only')
+    
+    # Always add --daemon flag for restore
+    cmd.append('--daemon')
+    
+    # Always skip confirmation
+    cmd.append('-y')
+    
+    return cmd
+
+
 async def main_async(args: argparse.Namespace) -> int:
     """Async main function."""
     # Determine verbosity
@@ -1627,9 +1872,15 @@ def main():
         config_manager = get_config_manager()
         sys.exit(cmd_logs(args, config_manager))
     
+    if args.command == 'restore':
+        config_manager = get_config_manager()
+        sys.exit(cmd_restore(args, config_manager))
+    
     # Check for daemon mode
     if hasattr(args, 'daemon') and args.daemon:
-        config_manager = get_config_manager()
+        # Get account from args first
+        account = getattr(args, 'account', None)
+        config_manager = get_config_manager(account=account)
         daemon_manager = get_daemon_manager(config_manager.config_dir)
         
         # Get source/dest for tracking
@@ -1648,13 +1899,23 @@ def main():
                 except ValueError:
                     pass
         
+        # Extract full args for restore capability
+        daemon_args = _extract_daemon_args(args)
+        
+        # Get the active account alias
+        from .accounts import get_account_manager
+        account_mgr = get_account_manager(config_manager.base_dir)
+        active_account = account or account_mgr.get_active()
+        
         print(f"Starting daemon...")
         
         # Daemonize - returns 0 in child, PID in parent
         child_pid = daemon_manager.daemonize(
             command=args.command,
             source=source,
-            dest=dest
+            dest=dest,
+            args=daemon_args,
+            account=active_account
         )
         
         if child_pid > 0:
@@ -1663,6 +1924,7 @@ def main():
             print(f"Logs: telegram-cli logs {child_pid}")
             print(f"Kill: telegram-cli kill {child_pid}")
             print(f"List: telegram-cli list")
+            print(f"Restore after reboot: telegram-cli restore")
             sys.exit(0)
         
         # We're in the child - continue with normal execution

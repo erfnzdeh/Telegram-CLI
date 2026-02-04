@@ -603,55 +603,98 @@ class Forwarder:
             transform_chain: Optional transform chain to apply to messages
             msg_filter: Optional message filter
         """
+        from datetime import datetime
+        
         self.logger.info(f"Starting live forwarding from {source_id}")
         self.logger.info(f"Destinations: {', '.join(map(str, dest_ids))}")
         if transform_chain:
             self.logger.info(f"Transform: enabled ({len(transform_chain)} transforms)")
         if msg_filter:
             self.logger.info(f"Filters: {msg_filter.describe()}")
-        self.logger.info("Press Ctrl+C to stop...")
+        self.logger.info("Waiting for new messages... (Ctrl+C to stop)")
+        self.logger.info("-" * 50)
+        
+        # Track stats
+        stats = {"forwarded": 0, "skipped": 0, "failed": 0}
         
         @self.client.on(events.NewMessage(chats=[source_id]))
         async def handler(event):
             message = event.message
+            timestamp = datetime.now().strftime("%H:%M:%S")
             
             forwardable, reason = is_forwardable(message)
             if not forwardable:
-                self.logger.verbose(f"Skip live msg {message.id}: {reason}")
+                stats["skipped"] += 1
+                self.logger.verbose(f"[{timestamp}] Skip: {reason}")
                 return
             
             # Apply custom filter
             if msg_filter:
                 matches, filter_reason = msg_filter.matches(message)
                 if not matches:
-                    self.logger.verbose(f"Filter live msg {message.id}: {filter_reason}")
+                    stats["skipped"] += 1
+                    self.logger.verbose(f"[{timestamp}] Filter: {filter_reason}")
                     return
             
             try:
+                # Get message preview for logging
+                text_preview = ""
+                if message.text:
+                    text_preview = message.text[:50].replace('\n', ' ')
+                    if len(message.text) > 50:
+                        text_preview += "..."
+                elif message.media:
+                    from .utils import detect_message_type
+                    msg_type = detect_message_type(message)
+                    text_preview = f"[{msg_type.value}]"
+                
                 # If transform is provided, send transformed message instead of forwarding
                 if transform_chain:
                     await self._send_transformed_message(
                         message, dest_ids, transform_chain, delete_after, source_id
                     )
-                    self.logger.verbose(f"Sent transformed message {message.id}")
+                    stats["forwarded"] += 1
+                    self.logger.info(f"[{timestamp}] Forwarded #{message.id}: {text_preview}")
                 else:
                     # Standard forward
                     result = await self.forward_to_destinations(
                         [message], dest_ids, drop_author, delete_after, source_id
                     )
                     if result.success:
-                        self.logger.verbose(f"Forwarded new message {message.id}")
+                        stats["forwarded"] += 1
+                        self.logger.info(f"[{timestamp}] Forwarded #{message.id}: {text_preview}")
+                    else:
+                        stats["failed"] += 1
+                        self.logger.warning(f"[{timestamp}] Failed #{message.id}: {text_preview}")
                     
             except AccountLimitedError as e:
                 self.logger.error(f"Account limited! Stopping live forward: {e}")
-                raise  # Will disconnect the handler
+                await self.client.disconnect()
             except Exception as e:
-                self.logger.error(f"Live forward failed: {e}")
+                stats["failed"] += 1
+                self.logger.error(f"[{timestamp}] Error: {e}")
         
         self._live_handler = handler
         
-        # Run until disconnected
-        await self.client.run_until_disconnected()
+        # Run until disconnected with proper signal handling
+        try:
+            await self.client.run_until_disconnected()
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        finally:
+            # Clean up handler
+            if self._live_handler:
+                self.client.remove_event_handler(self._live_handler)
+                self._live_handler = None
+            
+            # Show final stats
+            self.logger.info("-" * 50)
+            self.logger.info(
+                f"Stopped. "
+                f"Forwarded: {stats['forwarded']}, "
+                f"Skipped: {stats['skipped']}, "
+                f"Failed: {stats['failed']}"
+            )
     
     async def _send_transformed_message(
         self,
