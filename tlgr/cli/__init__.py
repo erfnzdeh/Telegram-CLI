@@ -57,7 +57,7 @@ class TlgrGroup(click.Group):
                         err=True,
                     )
                     sys.exit(2)
-                if has_sub_rules and isinstance(cmd, click.MultiCommand) and rest:
+                if has_sub_rules and isinstance(cmd, click.Group) and rest:
                     sub_name = rest[0] if rest else None
                     if sub_name and not group_allowed:
                         full_path = f"{name_l}.{sub_name.lower()}"
