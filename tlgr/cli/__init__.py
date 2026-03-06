@@ -177,6 +177,8 @@ from tlgr.cli.config_cmd import config_group  # noqa: E402
 from tlgr.cli.completion import completion_group  # noqa: E402
 from tlgr.cli.schema import schema_command  # noqa: E402
 from tlgr.cli.agent import agent_group  # noqa: E402
+from tlgr.cli.user import user_group  # noqa: E402
+from tlgr.cli.watch import watch_command  # noqa: E402
 
 cli.add_command(account_group, "account")
 cli.add_command(message_group, "message")
@@ -191,6 +193,8 @@ cli.add_command(config_group, "config")
 cli.add_command(completion_group, "completion")
 cli.add_command(schema_command, "schema")
 cli.add_command(agent_group, "agent")
+cli.add_command(user_group, "user")
+cli.add_command(watch_command, "watch")
 
 
 # ---------------------------------------------------------------------------

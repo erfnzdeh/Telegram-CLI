@@ -491,3 +491,55 @@ class ClientWrapper:
     ) -> dict[str, Any]:
         msg = await self.client.send_file(chat_id, file_path, caption=caption)
         return {"id": msg.id, "chat_id": chat_id}
+
+    async def mark_read(self, chat_id: int | str, up_to: int | None = None) -> dict[str, Any]:
+        """Mark messages as read up to the latest (or a specific msg id)."""
+        if up_to:
+            await self.client.send_read_acknowledge(chat_id, max_id=up_to)
+        else:
+            await self.client.send_read_acknowledge(chat_id)
+        return {"read": True, "chat_id": chat_id}
+
+    async def send_typing(self, chat_id: int | str, duration: float = 5.0) -> dict[str, Any]:
+        """Send typing indicator for *duration* seconds."""
+        from telethon.tl.functions.messages import SetTypingRequest
+        from telethon.tl.types import SendMessageTypingAction
+
+        entity = await self.client.get_input_entity(chat_id)
+        await self.client(SetTypingRequest(peer=entity, action=SendMessageTypingAction()))
+        if duration > 0:
+            await asyncio.sleep(min(duration, 30))
+            from telethon.tl.types import SendMessageCancelAction
+            await self.client(SetTypingRequest(peer=entity, action=SendMessageCancelAction()))
+        return {"typing": True, "chat_id": chat_id, "duration": duration}
+
+    async def get_user_info(self, user_ref: str) -> dict[str, Any]:
+        """Get detailed info about a user."""
+        from telethon.tl.functions.users import GetFullUserRequest
+
+        entity = await self.client.get_entity(user_ref)
+        if not isinstance(entity, User):
+            return self._entity_to_dict(entity)
+
+        try:
+            full = await self.client(GetFullUserRequest(entity))
+            user = full.users[0] if full.users else entity
+            about = full.full_user.about or ""
+        except Exception:
+            user = entity
+            about = ""
+
+        status_str = ""
+        if hasattr(user, "status") and user.status:
+            status_str = type(user.status).__name__.replace("UserStatus", "").lower()
+
+        return {
+            "id": user.id,
+            "first_name": user.first_name or "",
+            "last_name": user.last_name or "",
+            "username": user.username,
+            "phone": user.phone,
+            "bio": about,
+            "is_bot": getattr(user, "bot", False),
+            "status": status_str,
+        }

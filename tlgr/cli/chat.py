@@ -126,3 +126,15 @@ def chat_leave(ctx: click.Context, chat: str, account: str | None) -> None:
         return
     result = ipc_request("POST", "/chat/leave", body={"chat": chat, "account": acct})
     emit(ctx.obj, result)
+
+
+@chat_group.command("typing")
+@click.argument("chat")
+@click.option("--duration", type=float, default=5, help="Seconds to show typing (default 5).")
+@click.option("--account", "-a", default=None)
+@click.pass_context
+def chat_typing(ctx: click.Context, chat: str, duration: float, account: str | None) -> None:
+    """Send a typing indicator."""
+    acct = account or ctx.obj.get("account", "")
+    result = ipc_request("POST", "/chat/typing", body={"chat": chat, "duration": duration, "account": acct})
+    emit(ctx.obj, result)

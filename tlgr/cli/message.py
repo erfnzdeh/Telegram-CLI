@@ -185,6 +185,21 @@ def message_pin(ctx: click.Context, chat: str, msg_id: int, account: str | None)
     emit(ctx.obj, result)
 
 
+@message_group.command("read")
+@click.argument("chat")
+@click.option("--up-to", type=int, default=None, help="Read up to this message ID.")
+@click.option("--account", "-a", default=None)
+@click.pass_context
+def message_read(ctx: click.Context, chat: str, up_to: int | None, account: str | None) -> None:
+    """Mark messages as read."""
+    acct = account or ctx.obj.get("account", "")
+    body: dict = {"chat": chat, "account": acct}
+    if up_to:
+        body["up_to"] = up_to
+    result = ipc_request("POST", "/message/read", body=body)
+    emit(ctx.obj, result)
+
+
 @message_group.command("react")
 @click.argument("chat")
 @click.argument("msg_id", type=int)
