@@ -139,3 +139,34 @@ def account_info(ctx: click.Context, alias: str | None) -> None:
         click.echo(f"Account '{alias}' not found", err=True)
         sys.exit(1)
     output_result(acct.to_dict(), fmt=ctx.obj.get("fmt", "human"), columns=["alias", "user_id", "username", "first_name", "phone", "created_at"])
+
+
+@account_group.command("sync")
+@click.argument("alias", required=False)
+@click.pass_context
+def account_sync(ctx: click.Context, alias: str | None) -> None:
+    """Sync stored account info from the live Telegram profile."""
+    from tlgr.ipc_client import ipc_request
+
+    mgr = _get_mgr()
+    if alias is None:
+        alias = mgr.get_active()
+    if alias is None:
+        click.echo("No active account", err=True)
+        sys.exit(1)
+    acct = mgr.get_account(alias)
+    if acct is None:
+        click.echo(f"Account '{alias}' not found", err=True)
+        sys.exit(1)
+
+    profile = ipc_request("GET", f"/profile/get?account={alias}")
+    mgr.update_account(
+        alias,
+        phone=profile.get("phone"),
+        username=profile.get("username"),
+        first_name=profile.get("first_name"),
+        user_id=profile.get("id"),
+    )
+    updated = mgr.get_account(alias)
+    fmt = ctx.obj.get("fmt", "human")
+    output_result(updated.to_dict(), fmt=fmt, columns=["alias", "user_id", "username", "first_name", "phone"])
