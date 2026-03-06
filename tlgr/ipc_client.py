@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from tlgr.core.config import get_socket_path, get_pid_path, CONFIG_DIR, load_app_config
-from tlgr.core.errors import DaemonNotRunningError, DaemonError, IPCError
+from tlgr.core.errors import DaemonNotRunningError, DaemonError, IPCError, RateLimitError
 
 
 def _daemon_is_running(base: Path | None = None) -> int | None:
@@ -129,6 +129,8 @@ def ipc_request(
 
     if status_code >= 400:
         error_msg = result.get("error", f"Daemon returned {status_code}")
+        if result.get("code") == "RATE_LIMITED":
+            raise RateLimitError(error_msg, wait_seconds=result.get("wait_seconds", 0))
         raise IPCError(error_msg)
 
     return result

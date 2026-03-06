@@ -44,16 +44,30 @@ class TlgrGroup(click.Group):
 
         enabled = ctx.params.get("enable_commands") or ""
         enabled = enabled.strip()
-        if enabled:
+        if enabled and cmd_name:
             allow = {p.strip().lower() for p in enabled.split(",") if p.strip()}
             if allow and "*" not in allow and "all" not in allow:
-                if cmd_name and cmd_name.lower() not in allow:
+                name_l = cmd_name.lower()
+                group_allowed = name_l in allow
+                has_sub_rules = any(a.startswith(f"{name_l}.") for a in allow)
+                if not group_allowed and not has_sub_rules:
                     click.echo(
                         f"Error: command {cmd_name!r} is not enabled "
                         f"(set --enable-commands to allow it)",
                         err=True,
                     )
                     sys.exit(2)
+                if has_sub_rules and isinstance(cmd, click.MultiCommand) and rest:
+                    sub_name = rest[0] if rest else None
+                    if sub_name and not group_allowed:
+                        full_path = f"{name_l}.{sub_name.lower()}"
+                        if full_path not in allow:
+                            click.echo(
+                                f"Error: command {full_path!r} is not enabled "
+                                f"(set --enable-commands to allow it)",
+                                err=True,
+                            )
+                            sys.exit(2)
 
         return cmd_name, cmd, rest
 
@@ -74,7 +88,7 @@ class TlgrGroup(click.Group):
 )
 @click.option(
     "--enable-commands", default=_env_or("TLGR_ENABLE_COMMANDS", ""),
-    help="Comma-separated allowlist of enabled top-level commands (sandboxing).",
+    help="Comma-separated allowlist of commands (e.g. 'message.send,chat.list').",
 )
 @click.option(
     "--results-only", is_flag=True, default=False,

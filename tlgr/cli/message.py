@@ -6,7 +6,7 @@ import sys
 
 import click
 
-from tlgr.core.output import emit
+from tlgr.core.output import add_pagination, decode_cursor, emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -59,6 +59,7 @@ def message_send(
 @click.argument("chat")
 @click.option("--limit", "-n", type=int, default=20)
 @click.option("--offset-id", type=int, default=0)
+@click.option("--cursor", default=None, help="Pagination cursor from a previous response.")
 @click.option("--sender", is_flag=True, help="Include sender info.")
 @click.option("--media", is_flag=True, help="Include media metadata.")
 @click.option("--reactions", is_flag=True, help="Include reactions.")
@@ -70,6 +71,7 @@ def message_list(
     chat: str,
     limit: int,
     offset_id: int,
+    cursor: str | None,
     sender: bool,
     media: bool,
     reactions: bool,
@@ -78,6 +80,9 @@ def message_list(
 ) -> None:
     """List recent messages from a chat."""
     acct = account or ctx.obj.get("account", "")
+    cur = decode_cursor(cursor)
+    if cur.get("offset_id"):
+        offset_id = cur["offset_id"]
     params = f"chat={chat}&limit={limit}&offset_id={offset_id}&account={acct}"
     if sender:
         params += "&sender=1"
@@ -90,6 +95,9 @@ def message_list(
     result = ipc_request("GET", f"/message/list?{params}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
+        msgs = result.get("messages", [])
+        next_state = {"offset_id": msgs[-1]["id"]} if msgs else {}
+        add_pagination(result, msgs, limit, next_state)
         emit(ctx.obj, result)
     else:
         emit(ctx.obj, result.get("messages", []), columns=["id", "date", "text"])
@@ -130,6 +138,7 @@ def message_delete(ctx: click.Context, chat: str, msg_ids: tuple[int, ...], acco
 @click.option("--local", is_flag=True, help="Client-side regex search.")
 @click.option("--regex", default=None, help="Regex pattern (with --local).")
 @click.option("--limit", "-n", type=int, default=20)
+@click.option("--cursor", default=None, help="Pagination cursor from a previous response.")
 @click.option("--account", "-a", default=None)
 @click.pass_context
 def message_search(
@@ -139,11 +148,16 @@ def message_search(
     local: bool,
     regex: str | None,
     limit: int,
+    cursor: str | None,
     account: str | None,
 ) -> None:
     """Search messages in a chat."""
     acct = account or ctx.obj.get("account", "")
+    cur = decode_cursor(cursor)
+    offset_id = cur.get("offset_id", 0)
     params = f"chat={chat}&query={query}&limit={limit}&account={acct}"
+    if offset_id:
+        params += f"&offset_id={offset_id}"
     if local:
         params += "&local=1"
     if regex:
@@ -151,6 +165,9 @@ def message_search(
     result = ipc_request("GET", f"/message/search?{params}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
+        msgs = result.get("messages", [])
+        next_state = {"offset_id": msgs[-1]["id"]} if msgs else {}
+        add_pagination(result, msgs, limit, next_state)
         emit(ctx.obj, result)
     else:
         emit(ctx.obj, result.get("messages", []), columns=["id", "date", "text"])

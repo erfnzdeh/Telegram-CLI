@@ -8,6 +8,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from aiohttp import web
+from telethon.errors import FloodWaitError
 
 if TYPE_CHECKING:
     from tlgr.daemon.server import DaemonServer
@@ -23,8 +24,8 @@ def _json_response(data: Any, status: int = 200) -> web.Response:
     )
 
 
-def _error_response(msg: str, status: int = 400) -> web.Response:
-    return _json_response({"error": msg, "code": "IPC_ERROR"}, status=status)
+def _error_response(msg: str, status: int = 400, code: str = "IPC_ERROR") -> web.Response:
+    return _json_response({"error": msg, "code": code}, status=status)
 
 
 async def _get_body(request: web.Request) -> dict[str, Any]:
@@ -32,6 +33,16 @@ async def _get_body(request: web.Request) -> dict[str, Any]:
         return await request.json()
     except Exception:
         return {}
+
+
+def _handle_exception(e: Exception) -> web.Response:
+    """Convert exceptions to appropriate IPC error responses."""
+    if isinstance(e, FloodWaitError):
+        return _json_response(
+            {"error": str(e), "code": "RATE_LIMITED", "wait_seconds": e.seconds},
+            status=429,
+        )
+    return _error_response(str(e), 500)
 
 
 class IPCServer:
@@ -123,7 +134,7 @@ class IPCServer:
             )
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _message_list(self, request: web.Request) -> web.Response:
         q = request.query
@@ -143,7 +154,7 @@ class IPCServer:
             )
             return _json_response({"messages": msgs})
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _message_get(self, request: web.Request) -> web.Response:
         q = request.query
@@ -155,7 +166,7 @@ class IPCServer:
             msg = await client.get_message(q["chat"], int(q["msg_id"]))
             return _json_response(msg)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _message_delete(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -167,7 +178,7 @@ class IPCServer:
             deleted = await client.delete_messages(body["chat"], body["msg_ids"])
             return _json_response({"deleted": deleted})
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _message_search(self, request: web.Request) -> web.Response:
         q = request.query
@@ -185,7 +196,7 @@ class IPCServer:
             )
             return _json_response({"messages": msgs})
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _message_pin(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -197,7 +208,7 @@ class IPCServer:
             result = await client.pin_message(body["chat"], body["msg_id"])
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _message_react(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -209,7 +220,7 @@ class IPCServer:
             result = await client.react_to_message(body["chat"], body["msg_id"], body["emoji"])
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     # -- Chats --
 
@@ -229,7 +240,7 @@ class IPCServer:
                 chats.append(c)
             return _json_response({"chats": chats})
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _chat_get(self, request: web.Request) -> web.Response:
         q = request.query
@@ -241,7 +252,7 @@ class IPCServer:
             info = await client.get_chat_info(q["chat"])
             return _json_response(info)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _chat_create(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -257,7 +268,7 @@ class IPCServer:
             )
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _chat_archive(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -269,7 +280,7 @@ class IPCServer:
             result = await client.archive_chat(body["chat"])
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _chat_mute(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -281,7 +292,7 @@ class IPCServer:
             result = await client.mute_chat(body["chat"], body.get("duration"))
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _chat_leave(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -293,7 +304,7 @@ class IPCServer:
             result = await client.leave_chat(body["chat"])
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     # -- Contacts --
 
@@ -307,7 +318,7 @@ class IPCServer:
             contacts = await client.list_contacts()
             return _json_response({"contacts": contacts})
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _contact_add(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -319,7 +330,7 @@ class IPCServer:
             result = await client.add_contact(body["phone"], body.get("name", ""))
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _contact_remove(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -331,7 +342,7 @@ class IPCServer:
             result = await client.remove_contact(body["user"])
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _contact_search(self, request: web.Request) -> web.Response:
         q = request.query
@@ -343,7 +354,7 @@ class IPCServer:
             contacts = await client.search_contacts(q.get("query", ""))
             return _json_response({"contacts": contacts})
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     # -- Profile --
 
@@ -357,7 +368,7 @@ class IPCServer:
             profile = await client.get_profile()
             return _json_response(profile)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _profile_update(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -374,7 +385,7 @@ class IPCServer:
             )
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     # -- Media --
 
@@ -392,7 +403,7 @@ class IPCServer:
             )
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     async def _media_upload(self, request: web.Request) -> web.Response:
         body = await _get_body(request)
@@ -408,7 +419,7 @@ class IPCServer:
             )
             return _json_response(result)
         except Exception as e:
-            return _error_response(str(e), 500)
+            return _handle_exception(e)
 
     # -- Jobs --
 

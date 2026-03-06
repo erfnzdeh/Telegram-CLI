@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tlgr.core.output import emit
+from tlgr.core.output import add_pagination, decode_cursor, emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -17,6 +17,7 @@ def chat_group() -> None:
 @click.option("--type", "chat_type", default=None, help="Filter: user, group, channel, bot.")
 @click.option("--search", "-s", default=None, help="Filter by name.")
 @click.option("--limit", "-n", type=int, default=None)
+@click.option("--cursor", default=None, help="Pagination cursor from a previous response.")
 @click.option("--account", "-a", default=None)
 @click.pass_context
 def chat_list(
@@ -24,20 +25,27 @@ def chat_list(
     chat_type: str | None,
     search: str | None,
     limit: int | None,
+    cursor: str | None,
     account: str | None,
 ) -> None:
     """List all chats/dialogs."""
     acct = account or ctx.obj.get("account", "")
-    params = f"account={acct}"
+    cur = decode_cursor(cursor)
+    effective_limit = limit or 100
+    params = f"account={acct}&limit={effective_limit}"
+    if cur.get("offset"):
+        params += f"&offset={cur['offset']}"
     if chat_type:
         params += f"&type={chat_type}"
     if search:
         params += f"&search={search}"
-    if limit:
-        params += f"&limit={limit}"
     result = ipc_request("GET", f"/chat/list?{params}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
+        chats = result.get("chats", [])
+        offset = cur.get("offset", 0)
+        next_state = {"offset": offset + len(chats)}
+        add_pagination(result, chats, effective_limit, next_state)
         emit(ctx.obj, result)
     else:
         emit(

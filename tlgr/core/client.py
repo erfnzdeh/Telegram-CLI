@@ -15,20 +15,24 @@ from tlgr.core.errors import (
     SessionError,
     ConfigurationError,
     ChatNotFoundError,
+    RateLimitError,
     TlgrError,
 )
+
+DEFAULT_FLOOD_WAIT_MAX = 120
 
 
 def create_client(
     session_path: Path,
     api_id: int,
     api_hash: str,
+    flood_wait_max: int = DEFAULT_FLOOD_WAIT_MAX,
 ) -> TelegramClient:
     return TelegramClient(
         str(session_path),
         api_id,
         api_hash,
-        flood_sleep_threshold=120,
+        flood_sleep_threshold=flood_wait_max,
         request_retries=5,
         connection_retries=5,
         retry_delay=1,
@@ -38,10 +42,11 @@ def create_client(
 
 
 class ClientWrapper:
-    def __init__(self, session_path: Path, api_id: int, api_hash: str):
+    def __init__(self, session_path: Path, api_id: int, api_hash: str, flood_wait_max: int = DEFAULT_FLOOD_WAIT_MAX):
         self.session_path = session_path
         self.api_id = api_id
         self.api_hash = api_hash
+        self.flood_wait_max = flood_wait_max
         self._client: TelegramClient | None = None
         self._me: User | None = None
 
@@ -59,7 +64,7 @@ class ClientWrapper:
 
     async def connect(self) -> bool:
         """Connect. Returns True if already authorised."""
-        self._client = create_client(self.session_path, self.api_id, self.api_hash)
+        self._client = create_client(self.session_path, self.api_id, self.api_hash, self.flood_wait_max)
         await self._client.connect()
         if await self._client.is_user_authorized():
             self._me = await self._client.get_me()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from typing import Any, Sequence
@@ -187,3 +188,39 @@ def emit(ctx_obj: dict[str, Any], data: Any, **kwargs: Any) -> None:
     kwargs.setdefault("results_only", ctx_obj.get("results_only", False))
     kwargs.setdefault("select", ctx_obj.get("select"))
     output_result(data, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Cursor-based pagination helpers
+# ---------------------------------------------------------------------------
+
+def encode_cursor(state: dict[str, Any]) -> str:
+    """Encode pagination state as an opaque base64 cursor token."""
+    raw = json.dumps(state, separators=(",", ":"), sort_keys=True)
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def decode_cursor(token: str | None) -> dict[str, Any]:
+    """Decode a cursor token back to pagination state. Returns {} on invalid input."""
+    if not token:
+        return {}
+    try:
+        padded = token + "=" * (-len(token) % 4)
+        raw = base64.urlsafe_b64decode(padded).decode()
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def add_pagination(
+    envelope: dict[str, Any],
+    items: list[Any],
+    limit: int,
+    cursor_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Add ``has_more`` and ``next_cursor`` to a JSON envelope."""
+    has_more = len(items) >= limit
+    envelope["has_more"] = has_more
+    if has_more:
+        envelope["next_cursor"] = encode_cursor(cursor_state)
+    return envelope

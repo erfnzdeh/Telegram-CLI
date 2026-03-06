@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tlgr.core.output import emit
+from tlgr.core.output import add_pagination, decode_cursor, emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -14,17 +14,29 @@ def contact_group() -> None:
 
 
 @contact_group.command("list")
+@click.option("--limit", "-n", type=int, default=None, help="Max contacts to return.")
+@click.option("--cursor", default=None, help="Pagination cursor from a previous response.")
 @click.option("--account", "-a", default=None)
 @click.pass_context
-def contact_list(ctx: click.Context, account: str | None) -> None:
+def contact_list(ctx: click.Context, limit: int | None, cursor: str | None, account: str | None) -> None:
     """List all contacts."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("GET", f"/contact/list?account={acct}")
+    contacts = result.get("contacts", [])
+    cur = decode_cursor(cursor)
+    offset = cur.get("offset", 0)
+    if offset:
+        contacts = contacts[offset:]
+    effective_limit = limit or len(contacts)
+    page = contacts[:effective_limit]
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        emit(ctx.obj, result)
+        next_state = {"offset": offset + len(page)}
+        out = {"contacts": page}
+        add_pagination(out, page, effective_limit, next_state)
+        emit(ctx.obj, out)
     else:
-        emit(ctx.obj, result.get("contacts", []), columns=["id", "name", "username", "phone"])
+        emit(ctx.obj, page, columns=["id", "name", "username", "phone"])
 
 
 @contact_group.command("add")
@@ -55,14 +67,26 @@ def contact_remove(ctx: click.Context, user: str, account: str | None) -> None:
 
 @contact_group.command("search")
 @click.argument("query")
+@click.option("--limit", "-n", type=int, default=None, help="Max results.")
+@click.option("--cursor", default=None, help="Pagination cursor from a previous response.")
 @click.option("--account", "-a", default=None)
 @click.pass_context
-def contact_search(ctx: click.Context, query: str, account: str | None) -> None:
+def contact_search(ctx: click.Context, query: str, limit: int | None, cursor: str | None, account: str | None) -> None:
     """Search contacts."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("GET", f"/contact/search?query={query}&account={acct}")
+    contacts = result.get("contacts", [])
+    cur = decode_cursor(cursor)
+    offset = cur.get("offset", 0)
+    if offset:
+        contacts = contacts[offset:]
+    effective_limit = limit or len(contacts)
+    page = contacts[:effective_limit]
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        emit(ctx.obj, result)
+        next_state = {"offset": offset + len(page)}
+        out = {"contacts": page}
+        add_pagination(out, page, effective_limit, next_state)
+        emit(ctx.obj, out)
     else:
-        emit(ctx.obj, result.get("contacts", []), columns=["id", "name", "username"])
+        emit(ctx.obj, page, columns=["id", "name", "username"])
