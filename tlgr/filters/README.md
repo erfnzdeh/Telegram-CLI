@@ -4,14 +4,12 @@ Registry-based, composable event and message filters for the Gateway pipeline.
 
 ## How it works
 
-```
-  YAML filter block
-       │
-       ▼
-  parse_filter_config()  →  FilterNode tree (AND / OR / NOT)
-       │
-       ▼
-  evaluate(node, event)  →  (bool, reason)
+```mermaid
+flowchart LR
+    YAML["YAML filter block"] --> PARSE["parse_filter_config()"]
+    PARSE --> TREE["FilterNode tree<br/>AND / OR / NOT"]
+    TREE --> EVAL["evaluate(node, event)"]
+    EVAL --> RESULT["(bool, reason)"]
 ```
 
 Every filter is a plain function registered with `@register_filter`. Filters
@@ -98,16 +96,18 @@ filter-set can itself contain `any_of` / `none_of`, enabling arbitrary nesting.
 
 The YAML filter block is parsed into a tree of `FilterNode` objects:
 
-```
-AND
-├── LEAF(chat_type=private)
-├── LEAF(contains=[hello])
-├── OR
-│   ├── LEAF(contains=[hi])
-│   └── LEAF(from_users=[12345])
-└── NOT
-    └── OR
-        └── LEAF(contains=[spam, ad])
+```mermaid
+flowchart TB
+    AND["AND"] --> L1["LEAF<br/>chat_type = private"]
+    AND --> L2["LEAF<br/>contains = hello"]
+    AND --> OR["OR"]
+    AND --> NOT["NOT"]
+
+    OR --> O1["LEAF<br/>contains = hi"]
+    OR --> O2["LEAF<br/>from_users = 12345"]
+
+    NOT --> NOR["OR"]
+    NOR --> N1["LEAF<br/>contains = spam, ad"]
 ```
 
 `evaluate(node, event)` walks the tree recursively:

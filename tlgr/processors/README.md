@@ -5,14 +5,12 @@ called "transforms").
 
 ## How it works
 
-```
-  YAML processors list
-       │
-       ▼
-  create_chain_from_list()  →  ProcessorChain
-       │
-       ▼
-  chain.apply(text)  →  modified text
+```mermaid
+flowchart LR
+    YAML["YAML processors list"] --> CREATE["create_chain_from_list()"]
+    CREATE --> CHAIN["ProcessorChain"]
+    CHAIN --> APPLY["chain.apply(text)"]
+    APPLY --> OUT["modified text"]
 ```
 
 Every processor is a plain function registered with `@register_processor`.

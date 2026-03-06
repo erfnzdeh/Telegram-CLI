@@ -6,15 +6,12 @@ etc.) based on the event that passed through filters and processors.
 
 ## How it works
 
-```
-  Event passes filters
-       │
-       ▼
-  For each action in the job's action list:
-       │
-       ├── Check per-action filters (optional)
-       ├── Resolve processor chain (per-action overrides job-level)
-       └── Execute: action_func(event, config, client, chain)
+```mermaid
+flowchart TB
+    E["Event passes filters"] --> LOOP["For each action in the job's action list"]
+    LOOP --> CHECK["Check per-action filters<br/>(optional)"]
+    CHECK --> RESOLVE["Resolve processor chain<br/>(per-action overrides job-level)"]
+    RESOLVE --> EXEC["Execute<br/>action_func(event, config, client, chain)"]
 ```
 
 Every action is an async function registered with `@register_action`. Actions

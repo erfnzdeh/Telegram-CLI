@@ -1,318 +1,124 @@
 # tlgr
 
-Full Telegram account control from the terminal -- agent-friendly, daemon-based, with an extensible event pipeline.
+![GitHub Repo Banner](https://ghrb.waren.build/banner?header=tlgr%F0%9F%A7%AD&subheader=Telegram+in+your+terminal&bg=f3f4f6&color=1f2937&support=true)
+<!-- Created with GitHub Repo Banner by Waren Gonzaga: https://ghrb.waren.build -->
+
+Full Telegram account control from the terminal. Agent-friendly, daemon-based, with webhook event push.
 
 ```
 pip install tlgr
 ```
 
-## Architecture
-
-tlgr has three layers, each serving a different purpose:
-
-```
-                    ┌────────────────────────────────────┐
-                    │              tlgr                   │
-                    │                                     │
-  You / Agent ─────┤  Layer 1: CLI                       │
-                    │  One-shot commands                  │
-                    │  send, list, download, manage       │
-                    │                                     │
-                    ├────────────────────────────────────-─┤
-                    │                                     │
-  Telegram ◄───────┤  Layer 2: Gateway                   │
-                    │  Event-driven pipeline              │
-                    │  event → filters → processors →     │
-                    │  actions                            │
-                    │                                     │
-                    ├─────────────────────────────────────┤
-                    │                                     │
-  HTTP endpoints ◄─┤  Layer 3: Webhook                   │
-                    │  Outbound push                      │
-                    │  events → HTTP POST                 │
-                    │                                     │
-                    └────────────────────────────────────-┘
-```
-
-**CLI** -- direct commands that connect to Telegram, do their thing, and exit.
-Send messages, list chats, download media, manage accounts.
-
-**Gateway** -- the always-on event pipeline running inside the daemon. Receives
-Telegram events, runs them through filters, optionally processes text, then
-executes actions (reply, forward, and more). All three subsystems (filters,
-processors, actions) are registry-based and extensible.
-
-**Webhook** -- pushes Telegram events to external HTTP endpoints for agent
-integration.
-
-### How it connects
-
-```
-                              ┌──────────────────────┐
-  tlgr CLI ──────────────────►│                      │
-                              │    tlgr daemon       │
-  tlgr CLI ──── IPC socket ──►│                      │──── Telegram API
-                              │  ┌── Gateway jobs    │
-                              │  └── Webhook push ───┼──── HTTP endpoints
-                              └──────────────────────┘
-```
-
-The daemon auto-starts when you run any command that needs it.
-
 ## Quickstart
 
 ```bash
-# 1. Create config files
-tlgr config init
-
-# 2. Add a Telegram account
-tlgr account add +15551234567
-
-# 3. Start the daemon
-tlgr daemon start
-
-# 4. Send a message
-tlgr message send @username "Hello from tlgr"
-
-# 5. List your chats
-tlgr chat list --limit 20
+tlgr config init                              # create config files
+tlgr account add +15551234567                  # authenticate
+tlgr daemon start                             # start background daemon
+tlgr message send @username "Hello from tlgr" # send a message
+tlgr chat list --limit 20                     # list your chats
 ```
 
-## Gateway -- Event Pipeline
+## CLI
 
-The Gateway is the core of tlgr's automation. Each job is a declarative
-pipeline defined in `~/.tlgr/jobs.yaml`:
+Every Telegram operation available as a single command. Three output modes: human-readable tables (default), JSON (`--json`) for agents, and plain TSV (`--plain`) for piping.
 
-```
-  Telegram event
-       │
-       ▼
-  ┌─────────┐
-  │ Filters  │  chat_type, contains, regex, time_of_day, ...
-  │ (AND/OR/ │  Composable with any_of / none_of
-  │  NOT)    │
-  └────┬─────┘
-       │ passed
-       ▼
-  ┌────────────┐
-  │ Processors │  strip_formatting, add_prefix, regex_replace, ...
-  │ (optional) │  Text modification chain
-  └────┬───────┘
-       │
-       ▼
-  ┌─────────┐
-  │ Actions  │  reply, forward, ...
-  │ (1..N)   │  Each can have its own filters & processors
-  └──────────┘
+```mermaid
+flowchart LR
+    USER["You / Agent"] --> CLI["tlgr CLI"]
+    CLI -->|"direct"| TG["Telegram API"]
+    CLI -->|"IPC socket"| DAEMON["tlgr daemon"]
+    DAEMON --> TG
 ```
 
-### Example: auto-reply to private messages
+### Messages
 
-```yaml
-jobs:
-  - name: private-bot
-    account: main
-    filters:
-      chat_type: private
-    actions:
-      - reply: "shut up i'm just a bot!"
+```bash
+tlgr message send <chat> <text>        # --file, --caption, --reply-to, --silent
+tlgr message list <chat>               # --limit, --sender, --media, --reactions
+tlgr message get <chat> <msg_id>       # full metadata
+tlgr message delete <chat> <ids...>
+tlgr message search <chat> <query>     # --local for regex, --regex <pattern>
+tlgr message pin <chat> <msg_id>
+tlgr message react <chat> <id> <emoji>
 ```
 
-### Example: forward with text processing
+### Chats
 
-```yaml
-jobs:
-  - name: news-forward
-    account: main
-    filters:
-      chat_id: "@raw_feed"
-      types: [text, photo]
-      contains: [breaking]
-    actions:
-      - forward:
-          to: ["@clean_feed"]
-          processors: [strip_formatting]
-      - forward:
-          to: ["@archive"]
+```bash
+tlgr chat list                         # --type, --search, --limit
+tlgr chat get <chat>
+tlgr chat create <name>                # --type group|channel, --members
+tlgr chat archive <chat>
+tlgr chat mute <chat> [duration]
+tlgr chat leave <chat>
 ```
 
-### Example: complex filter composition
+### Contacts
 
-```yaml
-jobs:
-  - name: smart-reply
-    account: main
-    filters:
-      chat_type: private
-      any_of:
-        - contains: [hello, hi]
-        - from_users: [12345]
-      none_of:
-        - contains: [spam, ad]
-    actions:
-      - reply: "Thanks for reaching out!"
+```bash
+tlgr contact list
+tlgr contact add <phone> [name]
+tlgr contact remove <user>
+tlgr contact search <query>
 ```
 
-See [tlgr/gateway/README.md](tlgr/gateway/README.md) for the full pipeline reference.
+### Media
 
-## Filters
-
-Registry-based, composable filters. Top-level keys are AND'd. Use `any_of`
-for OR, `none_of` for NOT.
-
-| Filter | Description | Value |
-|--------|-------------|-------|
-| `chat_type` | private, group, supergroup, channel | `str` or `list` |
-| `chat_id` | Match by chat ID or @username | `int/str` or `list` |
-| `chat_title` | Regex match on chat title | `str` (pattern) |
-| `is_incoming` | Incoming vs outgoing | `bool` |
-| `sender_is_bot` | Sender is a bot | `bool` |
-| `sender_is_self` | Sent by yourself | `bool` |
-| `contains` | All keywords must appear | `list[str]` |
-| `contains_any` | At least one keyword | `list[str]` |
-| `excludes` | No keyword may appear | `list[str]` |
-| `regex` | Text must match pattern | `str` (pattern) |
-| `has_links` | Has URL entities | `bool` |
-| `types` | Message type whitelist | `list[str]` |
-| `exclude_types` | Message type blacklist | `list[str]` |
-| `has_media` | Has media attachment | `bool` |
-| `is_reply` | Is a reply | `bool` |
-| `is_forward` | Is forwarded | `bool` |
-| `after` | After date/time | `str` (date) |
-| `before` | Before date/time | `str` (date) |
-| `time_of_day` | Within time range | `str` (`"HH:MM-HH:MM"`) |
-| `from_users` | Sender in list | `list[int]` |
-| `exclude_users` | Sender not in list | `list[int]` |
-
-See [tlgr/filters/README.md](tlgr/filters/README.md) for composition examples and how to add custom filters.
-
-## Processors
-
-Text modification functions applied in sequence:
-
-| Processor | Description | Config |
-|-----------|-------------|--------|
-| `replace_mentions` | Replace @mentions | `replacement`, `pattern` |
-| `remove_links` | Remove URLs | `replacement` |
-| `remove_hashtags` | Remove #hashtags | `replacement` |
-| `strip_formatting` | Normalize whitespace | -- |
-| `add_prefix` | Add text at start | `prefix` |
-| `add_suffix` | Add text at end | `suffix` |
-| `regex_replace` | Custom regex | `pattern`, `replacement`, `flags` |
-
-Inline regex in YAML:
-
-```yaml
-processors:
-  - strip_formatting
-  - type: regex
-    pattern: "\\b(secret)\\b"
-    replacement: "[REDACTED]"
-    flags: i
+```bash
+tlgr media download <chat> <msg_id>    # --out-dir
+tlgr media upload <chat> <path>        # --caption
 ```
 
-See [tlgr/processors/README.md](tlgr/processors/README.md) for the full reference.
+### Profile
 
-## Actions
-
-| Action | Description | Config |
-|--------|-------------|--------|
-| `reply` | Reply to the message | `str` (reply text) |
-| `forward` | Forward to destinations | `{to: [...], drop_author: bool, processors: [...]}` |
-
-Each action in a job's action list can have its own `filters` and `processors`
-overrides. See [tlgr/actions/README.md](tlgr/actions/README.md).
-
-## CLI Commands
-
-```
-tlgr account add <phone>              Authenticate a new account
-tlgr account list                     List accounts (* = default)
-tlgr account switch <alias>           Set default account
-tlgr account remove <alias>           Remove account
-tlgr account rename <old> <new>       Rename alias
-tlgr account info [alias]             Show details
-
-tlgr message send <chat> <text>       Send text (--file, --caption, --reply-to, --silent)
-tlgr message list <chat>              List messages (--limit, --sender, --media, --reactions)
-tlgr message get <chat> <msg_id>      Get single message with full metadata
-tlgr message delete <chat> <ids...>   Delete messages
-tlgr message search <chat> <query>    Search (--local for regex, --regex <pattern>)
-tlgr message pin <chat> <msg_id>      Pin a message
-tlgr message react <chat> <id> <emoji> React to a message
-
-tlgr chat list                        List chats (--type, --search, --limit)
-tlgr chat get <chat>                  Chat info
-tlgr chat create <name>               Create group/channel (--type, --members)
-tlgr chat archive <chat>              Archive
-tlgr chat mute <chat> [duration]      Mute (seconds, omit for permanent)
-tlgr chat leave <chat>                Leave
-
-tlgr contact list                     List contacts
-tlgr contact add <phone> [name]       Add contact
-tlgr contact remove <user>            Remove contact
-tlgr contact search <query>           Search contacts
-
-tlgr profile get                      Show your profile
-tlgr profile update                   Update (--first-name, --last-name, --bio, --photo)
-
-tlgr media download <chat> <msg_id>   Download media (--out-dir)
-tlgr media upload <chat> <path>       Upload file (--caption)
-
-tlgr daemon start                     Start daemon (--foreground)
-tlgr daemon stop                      Stop daemon
-tlgr daemon status                    Show status
-tlgr daemon logs                      View logs (--follow)
-
-tlgr job list                         List background jobs
-tlgr job add                          Open jobs.yaml in $EDITOR
-tlgr job remove <name>                Remove job
-tlgr job enable <name>                Enable job
-tlgr job disable <name>               Disable job
-
-tlgr config init                      Create default config files
-tlgr config validate                  Validate configs
-
-tlgr completion bash|zsh|fish         Shell completions
+```bash
+tlgr profile get
+tlgr profile update                    # --first-name, --last-name, --bio, --photo
 ```
 
-## Global Flags
+### Accounts
+
+```bash
+tlgr account add <phone>              # authenticate a new account
+tlgr account list                     # (* = default)
+tlgr account switch <alias>
+tlgr account remove <alias>
+tlgr account rename <old> <new>
+tlgr account info [alias]
+```
+
+### Daemon
+
+```bash
+tlgr daemon start                     # --foreground
+tlgr daemon stop
+tlgr daemon status
+tlgr daemon logs                      # --follow
+```
+
+### Global Flags
 
 ```
---json              Output JSON to stdout
---plain             Output stable TSV for piping
+--json              JSON to stdout (for scripting and agents)
+--plain             Stable TSV for piping
 -a, --account TEXT  Account alias to use
---version           Show version
---help              Show help
+--version / --help
 ```
 
-## Configuration
+## Webhook -- Event Push
 
-Config files live in `~/.tlgr/`:
+tlgr pushes Telegram events to an external HTTP endpoint in real time. Designed for agentic interfaces like [OpenClaw](https://github.com/openclaw) where an agent receives events and calls `tlgr` CLI commands to act.
 
-| File | Format | Purpose |
-|------|--------|---------|
-| `config.toml` | TOML | App defaults, daemon, accounts |
-| `jobs.yaml` | YAML | Gateway job definitions |
-| `webhook.toml` | TOML | Outbound webhook push |
-
-### config.toml
-
-```toml
-[defaults]
-drop_author = false
-delete_after = false
-output = "human"
-
-[accounts]
-default = "main"
-
-[daemon]
-auto_start = true
-log_level = "info"
+```mermaid
+flowchart LR
+    TG["Telegram"] --> DAEMON["tlgr daemon"]
+    DAEMON -->|"POST /hooks/agent"| AGENT["Your Agent"]
+    AGENT -->|"tlgr --json message send ..."| CLI["tlgr CLI"]
+    CLI --> TG
 ```
 
-### webhook.toml
+Configure in `~/.tlgr/webhook.toml`:
 
 ```toml
 [webhook]
@@ -330,7 +136,7 @@ backoff_base = 2
 chats = ["@important_channel"]
 ```
 
-Events are POSTed as JSON with `Authorization: Bearer <token>`:
+Events arrive as JSON with `Authorization: Bearer <token>`:
 
 ```json
 {
@@ -341,17 +147,85 @@ Events are POSTed as JSON with `Authorization: Bearer <token>`:
 }
 ```
 
-## Output Formats
+## Gateway -- Background Jobs
+
+tlgr also ships with a deterministic, always-on Gateway that runs background jobs on your Telegram account. Define declarative pipelines in `~/.tlgr/jobs.yaml` that automatically react to incoming messages -- auto-reply, auto-forward, filter by chat type, time of day, content, and more.
+
+```mermaid
+flowchart LR
+    TG["Telegram event"] --> F["Filters"]
+    F -->|"passed"| P["Processors"]
+    P --> A["Actions"]
+    A --> R["reply / forward / ..."]
+```
+
+A few examples of what you can do:
+
+```yaml
+jobs:
+  # Auto-reply to all private messages
+  - name: private-bot
+    account: main
+    filters:
+      chat_type: private
+    actions:
+      - reply: "shut up i'm just a bot!"
+
+  # Forward breaking news to your archive
+  - name: news-forward
+    account: main
+    filters:
+      chat_id: "@raw_feed"
+      types: [text, photo]
+      contains: [breaking]
+    actions:
+      - forward:
+          to: ["@clean_feed", "@archive"]
+          processors: [strip_formatting]
+
+  # Night-mode auto-reply
+  - name: night-mode
+    account: main
+    filters:
+      chat_type: private
+      time_of_day: "23:00-07:00"
+    actions:
+      - reply: "I'm sleeping. Will reply tomorrow."
+```
+
+Filters support full AND / OR / NOT composition, 20+ built-in filter types, 7 text processors, and a registry pattern for adding your own.
+
+For the full Gateway reference -- filters, processors, actions, composition, extensibility -- see **[Gateway documentation](tlgr/gateway/README.md)**.
+
+## Configuration
+
+Config files live in `~/.tlgr/`:
+
+| File | Format | Purpose |
+|------|--------|---------|
+| `config.toml` | TOML | App defaults, daemon, accounts |
+| `jobs.yaml` | YAML | Gateway job definitions |
+| `webhook.toml` | TOML | Outbound webhook push |
 
 ```bash
-# Human-readable (default) -- colored tables
-tlgr chat list
+tlgr config init       # create defaults
+tlgr config validate   # check syntax + validate filter/action names
+tlgr job add           # open jobs.yaml in $EDITOR
+tlgr job list          # show running jobs
+```
 
-# JSON -- for scripting and agents
-tlgr --json chat list | jq '.chats[] | .name'
+### config.toml
 
-# Plain TSV -- for piping
-tlgr --plain chat list | cut -f2
+```toml
+[defaults]
+output = "human"
+
+[accounts]
+default = "main"
+
+[daemon]
+auto_start = true
+log_level = "info"
 ```
 
 ## Multi-Account
@@ -371,36 +245,6 @@ jobs:
     # ...
 ```
 
-## Extending tlgr
-
-All three pipeline components use the same registry pattern. Add a custom
-filter, processor, or action by writing a decorated function:
-
-```python
-from tlgr.filters import register_filter
-
-@register_filter("my_filter")
-def my_filter(event, value):
-    # your logic here
-    return True, "matched"
-```
-
-See the package READMEs for details:
-- [Filters](tlgr/filters/README.md)
-- [Processors](tlgr/processors/README.md)
-- [Actions](tlgr/actions/README.md)
-- [Gateway](tlgr/gateway/README.md)
-
-## Error Handling
-
-When `--json` is active, errors are returned as JSON on stdout with a non-zero exit code:
-
-```json
-{"error": "Chat not found", "code": "CHAT_NOT_FOUND"}
-```
-
-Human-readable errors go to stderr. Rate limits are auto-waited with the duration reported.
-
 ## License
 
-MIT
+See [LICENSE](LICENSE) for license details.
