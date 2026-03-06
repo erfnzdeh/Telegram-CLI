@@ -1,4 +1,4 @@
-# Contributing to Telegram CLI
+# Contributing to tlgr
 
 Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
 
@@ -7,8 +7,8 @@ Thank you for your interest in contributing! This document provides guidelines f
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Telegram-CLI.git
-   cd Telegram-CLI
+   git clone https://github.com/YOUR_USERNAME/tlgr.git
+   cd tlgr
    ```
 3. Create a virtual environment:
    ```bash
@@ -41,7 +41,7 @@ Before submitting a PR:
 
 1. Ensure the code compiles without errors:
    ```bash
-   python -m py_compile telegram_forwarder/*.py
+   python -m py_compile tlgr/**/*.py
    ```
 
 2. Test your changes manually with a test Telegram account

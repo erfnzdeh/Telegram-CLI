@@ -35,7 +35,7 @@ Paste any error messages or logs here
 - OS: [e.g., macOS 14, Ubuntu 22.04, Windows 11]
 - Python version: [e.g., 3.11.5]
 - Telethon version: [run `pip show telethon`]
-- Telegram CLI version: [if applicable]
+- tlgr version: [run `tlgr --version`]
 
 ## Additional Context
 
