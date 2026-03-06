@@ -1,0 +1,22 @@
+[webhook]
+enabled = true
+url = "http://127.0.0.1:18789/hooks/agent"
+token = "your-shared-secret"
+events = [
+  "new_message",
+  "message_edited",
+  "message_deleted",
+  "user_joined",
+  "user_left",
+  "chat_action",
+  "message_read",
+  "reaction",
+]
+
+[webhook.retry]
+enabled = true
+max_attempts = 3
+backoff_base = 2  # seconds between retries (exponential)
+
+[webhook.filters]
+chats = []  # empty = all chats, or ["@channel", "-100123456"]

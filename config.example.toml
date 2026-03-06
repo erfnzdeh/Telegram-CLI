@@ -1,0 +1,11 @@
+[defaults]
+drop_author = false
+delete_after = false
+output = "human"  # "human" | "json" | "plain"
+
+[accounts]
+default = "main"
+
+[daemon]
+auto_start = true
+log_level = "info"  # "debug" | "info" | "warning" | "error"
