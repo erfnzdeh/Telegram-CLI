@@ -6,8 +6,9 @@ import sys
 
 import click
 
-from tlgr.core.config import CONFIG_DIR, load_app_config, load_jobs, load_webhook_config
+from tlgr.core.config import CONFIG_DIR, load_app_config, load_webhook_config
 from tlgr.core.output import output_result
+from tlgr.gateway.config import load_gateway_configs
 
 
 @click.group("config")
@@ -32,18 +33,21 @@ def config_init(ctx: click.Context) -> None:
         )
         created.append("config.toml")
 
-    jobs_path = CONFIG_DIR / "jobs.toml"
+    jobs_path = CONFIG_DIR / "jobs.yaml"
     if not jobs_path.exists():
         jobs_path.write_text(
-            "# Background jobs configuration\n"
-            "# [[jobs]]\n"
-            '# name = "example"\n'
-            '# type = "autoforward"\n'
-            '# account = "main"\n'
-            '# source = "@source_channel"\n'
-            '# destinations = ["@dest_channel"]\n'
+            "# Gateway jobs configuration\n"
+            "# See https://github.com/tlgrcli/tlgr for full reference.\n"
+            "#\n"
+            "# jobs:\n"
+            "#   - name: example\n"
+            "#     account: main\n"
+            "#     filters:\n"
+            "#       chat_type: private\n"
+            "#     actions:\n"
+            '#       - reply: "hello!"\n'
         )
-        created.append("jobs.toml")
+        created.append("jobs.yaml")
 
     webhook_path = CONFIG_DIR / "webhook.toml"
     if not webhook_path.exists():
@@ -69,7 +73,7 @@ def config_init(ctx: click.Context) -> None:
 @config_group.command("validate")
 @click.pass_context
 def config_validate(ctx: click.Context) -> None:
-    """Validate all TOML config files."""
+    """Validate configuration files."""
     errors = []
 
     try:
@@ -78,9 +82,18 @@ def config_validate(ctx: click.Context) -> None:
         errors.append(f"config.toml: {e}")
 
     try:
-        load_jobs()
+        configs = load_gateway_configs()
+        for cfg in configs:
+            if not cfg.name:
+                errors.append("jobs.yaml: job missing 'name' field")
+            if not cfg.actions:
+                errors.append(f"jobs.yaml: job '{cfg.name}' has no actions")
+            for ac in cfg.actions:
+                from tlgr.actions import get_action
+                if get_action(ac.name) is None:
+                    errors.append(f"jobs.yaml: job '{cfg.name}' has unknown action '{ac.name}'")
     except Exception as e:
-        errors.append(f"jobs.toml: {e}")
+        errors.append(f"jobs.yaml: {e}")
 
     try:
         load_webhook_config()
@@ -92,4 +105,4 @@ def config_validate(ctx: click.Context) -> None:
         output_result({"valid": False, "errors": errors}, fmt=fmt)
         sys.exit(1)
     else:
-        output_result({"valid": True, "files": ["config.toml", "jobs.toml", "webhook.toml"]}, fmt=fmt)
+        output_result({"valid": True, "files": ["config.toml", "jobs.yaml", "webhook.toml"]}, fmt=fmt)

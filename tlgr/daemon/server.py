@@ -21,9 +21,9 @@ from tlgr.core.config import (
     CONFIG_DIR,
     get_socket_path,
     load_app_config,
-    load_jobs,
     load_webhook_config,
 )
+from tlgr.gateway.config import load_gateway_configs
 from tlgr.daemon.ipc import IPCServer
 from tlgr.daemon.jobs import JobRunner
 from tlgr.daemon.lifecycle import write_pid, setup_logging, daemonize, read_pid
@@ -163,7 +163,7 @@ class DaemonServer:
 
         # Load configs
         app_config = load_app_config(self.base)
-        job_configs = load_jobs(self.base)
+        job_configs = load_gateway_configs(self.base)
         webhook_config = load_webhook_config(self.base)
 
         # Determine which accounts to connect

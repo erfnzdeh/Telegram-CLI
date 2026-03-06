@@ -6,18 +6,12 @@ import logging
 from typing import Any
 
 from tlgr.core.client import ClientWrapper
-from tlgr.core.config import JobConfig
 from tlgr.daemon.webhook import WebhookPusher
+from tlgr.gateway.config import GatewayConfig
+from tlgr.gateway.engine import Gateway
 from tlgr.jobs.base import BaseJob
-from tlgr.jobs.autoforward import AutoforwardJob
-from tlgr.jobs.autoreply import AutoreplyJob
 
 log = logging.getLogger("tlgr.daemon.jobs")
-
-JOB_TYPES: dict[str, type[BaseJob]] = {
-    "autoforward": AutoforwardJob,
-    "autoreply": AutoreplyJob,
-}
 
 
 class JobRunner:
@@ -26,14 +20,11 @@ class JobRunner:
 
     def create_job(
         self,
-        config: JobConfig,
+        config: GatewayConfig,
         client: ClientWrapper,
         webhook: WebhookPusher | None = None,
     ) -> BaseJob:
-        cls = JOB_TYPES.get(config.type)
-        if cls is None:
-            raise ValueError(f"Unknown job type: {config.type}")
-        job = cls(config, client, webhook)
+        job = Gateway(config, client, webhook)
         self._jobs[config.name] = job
         return job
 

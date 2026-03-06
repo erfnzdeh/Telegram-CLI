@@ -4,3 +4,4 @@ aiohttp>=3.9
 tomli>=2.0
 tomli-w>=1.0
 tqdm>=4.65
+pyyaml>=6.0
