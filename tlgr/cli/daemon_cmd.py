@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -63,7 +64,6 @@ def daemon_start(ctx: click.Context, foreground: bool) -> None:
 def daemon_stop(ctx: click.Context) -> None:
     """Stop the daemon."""
     if stop_daemon():
-        # Wait for cleanup
         for _ in range(20):
             time.sleep(0.25)
             if not get_pid_path().exists():
@@ -71,6 +71,75 @@ def daemon_stop(ctx: click.Context) -> None:
         output_result({"stopped": True}, fmt=ctx.obj.get("fmt", "human"))
     else:
         click.echo("Daemon is not running", err=True)
+        sys.exit(1)
+
+
+@daemon_group.command("restart")
+@click.pass_context
+def daemon_restart(ctx: click.Context) -> None:
+    """Restart the daemon."""
+    if read_pid():
+        stop_daemon()
+        for _ in range(20):
+            time.sleep(0.25)
+            if not get_pid_path().exists():
+                break
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "tlgr.daemon.server", "--base", str(CONFIG_DIR)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    sock = get_socket_path()
+    for _ in range(40):
+        time.sleep(0.25)
+        if sock.exists():
+            pid = read_pid()
+            fmt = ctx.obj.get("fmt", "human")
+            output_result({"restarted": True, "pid": pid or proc.pid}, fmt=fmt)
+            return
+    click.echo("Daemon did not start within 10 seconds", err=True)
+    sys.exit(1)
+
+
+@daemon_group.command("install")
+@click.option("--force", is_flag=True, help="Reinstall even if already installed.")
+@click.pass_context
+def daemon_install(ctx: click.Context, force: bool) -> None:
+    """Install as a system service (auto-start on login, restart on crash).
+
+    macOS: creates a LaunchAgent plist.
+    """
+    if platform.system() != "Darwin":
+        click.echo("Service installation is only supported on macOS for now.", err=True)
+        sys.exit(1)
+
+    from tlgr.daemon.launchd import is_installed, install
+
+    if is_installed() and not force:
+        click.echo("Service already installed. Use --force to reinstall.", err=True)
+        sys.exit(1)
+
+    plist_path = install(CONFIG_DIR, get_logs_dir())
+    fmt = ctx.obj.get("fmt", "human")
+    output_result({"installed": True, "plist": str(plist_path)}, fmt=fmt)
+
+
+@daemon_group.command("uninstall")
+@click.pass_context
+def daemon_uninstall(ctx: click.Context) -> None:
+    """Remove the system service (stop auto-start on login)."""
+    if platform.system() != "Darwin":
+        click.echo("Service installation is only supported on macOS for now.", err=True)
+        sys.exit(1)
+
+    from tlgr.daemon.launchd import uninstall
+
+    if uninstall():
+        output_result({"uninstalled": True}, fmt=ctx.obj.get("fmt", "human"))
+    else:
+        click.echo("Service is not installed.", err=True)
         sys.exit(1)
 
 
