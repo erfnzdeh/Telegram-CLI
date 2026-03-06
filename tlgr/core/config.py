@@ -118,6 +118,7 @@ class WebhookRetryConfig:
 @dataclass
 class WebhookFilterConfig:
     chats: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -268,6 +269,8 @@ def load_webhook_config(base: Path | None = None) -> WebhookConfig:
     retry_raw = wh_raw.get("retry", {})
     filters_raw = wh_raw.get("filters", {})
 
+    extra_filters = {k: v for k, v in filters_raw.items() if k != "chats"}
+
     return WebhookConfig(
         enabled=wh_raw.get("enabled", False),
         url=wh_raw.get("url", ""),
@@ -280,6 +283,7 @@ def load_webhook_config(base: Path | None = None) -> WebhookConfig:
         ),
         filters=WebhookFilterConfig(
             chats=filters_raw.get("chats", []),
+            raw=extra_filters,
         ),
     )
 

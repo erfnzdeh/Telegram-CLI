@@ -26,12 +26,19 @@ class ActionConfig:
     processors: ProcessorChain | None = None
 
 
+ALL_EVENT_TYPES = frozenset({
+    "new_message", "message_edited", "message_deleted",
+    "chat_action", "user_joined", "message_read",
+})
+
+
 @dataclass
 class GatewayConfig:
     """Parsed configuration for one Gateway job."""
     name: str = ""
     account: str = ""
     enabled: bool = True
+    events: list[str] = field(default_factory=lambda: ["new_message"])
     filters: FilterNode | None = None
     processors: ProcessorChain | None = None
     actions: list[ActionConfig] = field(default_factory=list)
@@ -74,6 +81,12 @@ def _parse_job(raw: dict[str, Any]) -> GatewayConfig:
         account=raw.get("account", ""),
         enabled=raw.get("enabled", True),
     )
+
+    raw_events = raw.get("events")
+    if raw_events and isinstance(raw_events, list):
+        cfg.events = [str(e) for e in raw_events if str(e) in ALL_EVENT_TYPES]
+    elif raw_events and isinstance(raw_events, str):
+        cfg.events = [raw_events] if raw_events in ALL_EVENT_TYPES else ["new_message"]
 
     cfg.filters = parse_filter_config(raw.get("filters"))
 

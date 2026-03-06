@@ -18,4 +18,5 @@ class Event:
     source: str
     raw: Any
     account: str = ""
+    event_type: str = "new_message"
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

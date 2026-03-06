@@ -36,6 +36,16 @@ class _GatewayJobConfig:
         self.account = gw.account
 
 
+_EVENT_TYPE_MAP = {
+    "new_message": (events.NewMessage, {}),
+    "message_edited": (events.MessageEdited, {}),
+    "message_deleted": (events.MessageDeleted, {}),
+    "chat_action": (events.ChatAction, {}),
+    "user_joined": (events.UserUpdate, {}),
+    "message_read": (events.MessageRead, {}),
+}
+
+
 class Gateway(BaseJob):
     """Generic pipeline job: filters -> processors -> actions."""
 
@@ -48,23 +58,35 @@ class Gateway(BaseJob):
         self._gw = config
         shim = _GatewayJobConfig(config)
         super().__init__(shim, client, webhook)  # type: ignore[arg-type]
-        self._handler = None
+        self._handlers: list = []
         self._stats: dict[str, int] = {"matched": 0, "skipped": 0, "errors": 0}
 
     async def setup(self) -> None:
         log.info(
-            "[%s] filters=%s actions=%s",
+            "[%s] events=%s filters=%s actions=%s",
             self.name,
+            self._gw.events,
             "yes" if self._gw.filters else "none",
             [a.name for a in self._gw.actions],
         )
 
     async def run(self) -> None:
-        @self.client.client.on(events.NewMessage(incoming=True))
-        async def handler(tg_event):
-            await self._handle(tg_event)
+        for event_type_name in self._gw.events:
+            mapping = _EVENT_TYPE_MAP.get(event_type_name)
+            if not mapping:
+                log.warning("[%s] unknown event type: %s", self.name, event_type_name)
+                continue
+            event_cls, kwargs = mapping
+            if event_type_name == "new_message":
+                kwargs = {"incoming": True}
 
-        self._handler = handler
+            et = event_type_name
+
+            @self.client.client.on(event_cls(**kwargs))
+            async def handler(tg_event, _et=et):
+                await self._handle(tg_event, _et)
+
+            self._handlers.append(handler)
 
         try:
             await asyncio.Future()
@@ -72,9 +94,9 @@ class Gateway(BaseJob):
             raise
 
     async def teardown(self) -> None:
-        if self._handler:
-            self.client.client.remove_event_handler(self._handler)
-            self._handler = None
+        for h in self._handlers:
+            self.client.client.remove_event_handler(h)
+        self._handlers.clear()
         log.info(
             "[%s] stopped — matched=%d skipped=%d errors=%d",
             self.name,
@@ -83,11 +105,12 @@ class Gateway(BaseJob):
             self._stats["errors"],
         )
 
-    async def _handle(self, tg_event) -> None:
+    async def _handle(self, tg_event, event_type: str = "new_message") -> None:
         envelope = Event(
             source="telegram",
             raw=tg_event,
             account=self._gw.account,
+            event_type=event_type,
         )
 
         ok, reason = evaluate(self._gw.filters, envelope)

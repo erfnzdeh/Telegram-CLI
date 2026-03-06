@@ -111,6 +111,7 @@ class IPCServer:
         app.router.add_post("/job/remove", self._job_remove)
         app.router.add_post("/job/enable", self._job_enable)
         app.router.add_post("/job/disable", self._job_disable)
+        app.router.add_post("/job/reload", self._job_reload)
 
     # -- Daemon --
 
@@ -484,3 +485,10 @@ class IPCServer:
         body = await _get_body(request)
         ok = await self.daemon.disable_job(body["name"])
         return _json_response({"disabled": ok})
+
+    async def _job_reload(self, request: web.Request) -> web.Response:
+        try:
+            result = await self.daemon.reload_jobs()
+            return _json_response(result)
+        except Exception as e:
+            return _handle_exception(e)

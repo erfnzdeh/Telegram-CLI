@@ -140,6 +140,47 @@ class DaemonServer:
     async def disable_job(self, name: str) -> bool:
         return await self._job_runner.disable_job(name)
 
+    async def reload_jobs(self) -> dict[str, Any]:
+        """Hot-reload jobs from jobs.yaml without restarting the daemon."""
+        new_configs = load_gateway_configs(self.base)
+        app_config = load_app_config(self.base)
+        acct_mgr = AccountManager(self.base)
+        default_account = app_config.default_account or acct_mgr.get_active() or ""
+
+        old_names = set(self._job_runner._jobs.keys())
+        new_names = {jc.name for jc in new_configs}
+
+        removed = old_names - new_names
+        added = new_names - old_names
+        updated = old_names & new_names
+
+        for name in removed:
+            await self._job_runner.remove_job(name)
+
+        for jc in new_configs:
+            if jc.name in added or jc.name in updated:
+                if jc.name in updated:
+                    await self._job_runner.remove_job(jc.name)
+                if not jc.enabled:
+                    continue
+                acct = jc.account or default_account
+                client = self._clients.get(acct)
+                if not client:
+                    acct_needed = acct
+                    if acct_needed:
+                        client = await self._connect_account(acct_needed)
+                if not client:
+                    log.warning("Job '%s' references unknown account '%s'", jc.name, acct)
+                    continue
+                try:
+                    job = self._job_runner.create_job(jc, client, self._webhook)
+                    if job.enabled:
+                        job.start()
+                except Exception:
+                    log.exception("Failed to create job '%s'", jc.name)
+
+        return {"reloaded": True, "added": list(added), "removed": list(removed), "updated": list(updated)}
+
     # -- Status & shutdown --
 
     def status(self) -> dict[str, Any]:

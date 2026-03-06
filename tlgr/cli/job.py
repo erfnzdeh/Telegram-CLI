@@ -75,3 +75,11 @@ def job_disable(ctx: click.Context, name: str) -> None:
     """Disable a job without removing it."""
     result = ipc_request("POST", "/job/disable", body={"name": name})
     emit(ctx.obj, result)
+
+
+@job_group.command("reload")
+@click.pass_context
+def job_reload(ctx: click.Context) -> None:
+    """Hot-reload jobs from jobs.yaml without restarting the daemon."""
+    result = ipc_request("POST", "/job/reload")
+    emit(ctx.obj, result)
