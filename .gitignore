@@ -93,4 +93,4 @@ logs/
 
 # TOML configs with secrets
 webhook.toml
-routes.toml
+jobs.toml

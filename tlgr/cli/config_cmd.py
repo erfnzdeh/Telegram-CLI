@@ -32,9 +32,9 @@ def config_init(ctx: click.Context) -> None:
         )
         created.append("config.toml")
 
-    routes_path = CONFIG_DIR / "routes.toml"
-    if not routes_path.exists():
-        routes_path.write_text(
+    jobs_path = CONFIG_DIR / "jobs.toml"
+    if not jobs_path.exists():
+        jobs_path.write_text(
             "# Background jobs configuration\n"
             "# [[jobs]]\n"
             '# name = "example"\n'
@@ -43,7 +43,7 @@ def config_init(ctx: click.Context) -> None:
             '# source = "@source_channel"\n'
             '# destinations = ["@dest_channel"]\n'
         )
-        created.append("routes.toml")
+        created.append("jobs.toml")
 
     webhook_path = CONFIG_DIR / "webhook.toml"
     if not webhook_path.exists():
@@ -80,7 +80,7 @@ def config_validate(ctx: click.Context) -> None:
     try:
         load_jobs()
     except Exception as e:
-        errors.append(f"routes.toml: {e}")
+        errors.append(f"jobs.toml: {e}")
 
     try:
         load_webhook_config()
@@ -92,4 +92,4 @@ def config_validate(ctx: click.Context) -> None:
         output_result({"valid": False, "errors": errors}, fmt=fmt)
         sys.exit(1)
     else:
-        output_result({"valid": True, "files": ["config.toml", "routes.toml", "webhook.toml"]}, fmt=fmt)
+        output_result({"valid": True, "files": ["config.toml", "jobs.toml", "webhook.toml"]}, fmt=fmt)

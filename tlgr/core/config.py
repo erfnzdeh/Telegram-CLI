@@ -214,7 +214,7 @@ def load_app_config(base: Path | None = None) -> AppConfig:
 
 def load_jobs(base: Path | None = None) -> list[JobConfig]:
     base = base or CONFIG_DIR
-    raw = _load_toml(base / "routes.toml")
+    raw = _load_toml(base / "jobs.toml")
     jobs_raw = raw.get("jobs", [])
     jobs: list[JobConfig] = []
     for j in jobs_raw:
@@ -255,7 +255,7 @@ def save_jobs(jobs: list[JobConfig], base: Path | None = None) -> None:
         if not d.get("transforms"):
             d.pop("transforms", None)
         jobs_dicts.append(d)
-    _save_toml(base / "routes.toml", {"jobs": jobs_dicts})
+    _save_toml(base / "jobs.toml", {"jobs": jobs_dicts})
 
 
 def load_webhook_config(base: Path | None = None) -> WebhookConfig:

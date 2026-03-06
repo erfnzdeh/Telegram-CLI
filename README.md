@@ -98,7 +98,7 @@ tlgr daemon status                    Show status
 tlgr daemon logs                      View logs (--follow)
 
 tlgr job list                         List background jobs
-tlgr job add                          Open routes.toml in $EDITOR
+tlgr job add                          Open jobs.toml in $EDITOR
 tlgr job remove <name>                Remove job
 tlgr job enable <name>                Enable job
 tlgr job disable <name>               Disable job
@@ -139,7 +139,7 @@ auto_start = true
 log_level = "info"
 ```
 
-### routes.toml — Background Jobs
+### jobs.toml — Background Jobs
 
 ```toml
 [[jobs]]
@@ -246,7 +246,7 @@ tlgr account switch work
 tlgr -a personal message send @friend "Hi"
 ```
 
-Jobs in routes.toml can reference different accounts:
+Jobs in jobs.toml can reference different accounts:
 
 ```toml
 [[jobs]]

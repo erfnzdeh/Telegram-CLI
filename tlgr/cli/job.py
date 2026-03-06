@@ -36,12 +36,12 @@ def job_list(ctx: click.Context) -> None:
 @job_group.command("add")
 def job_add() -> None:
     """Open routes.toml in $EDITOR to add a job."""
-    routes_path = CONFIG_DIR / "routes.toml"
-    if not routes_path.exists():
-        routes_path.parent.mkdir(parents=True, exist_ok=True)
-        routes_path.write_text('# Add jobs here. See tlgr docs for format.\n# [[jobs]]\n# name = "my-job"\n# type = "autoforward"\n# source = "@channel"\n# destinations = ["@dest"]\n')
+    jobs_path = CONFIG_DIR / "jobs.toml"
+    if not jobs_path.exists():
+        jobs_path.parent.mkdir(parents=True, exist_ok=True)
+        jobs_path.write_text('# Add jobs here. See tlgr docs for format.\n# [[jobs]]\n# name = "my-job"\n# type = "autoforward"\n# source = "@channel"\n# destinations = ["@dest"]\n')
     editor = os.environ.get("EDITOR", "vi")
-    os.execlp(editor, editor, str(routes_path))
+    os.execlp(editor, editor, str(jobs_path))
 
 
 @job_group.command("remove")
