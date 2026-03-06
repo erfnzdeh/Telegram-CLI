@@ -9,6 +9,8 @@ Full Telegram account control from the terminal. Agent-friendly, daemon-based, w
 pip install tlgr
 ```
 
+> **For agents:** Authentication requires human interaction (phone code, 2FA). Run `tlgr account add` yourself first, then hand the CLI to your agent. See [AGENT.md](AGENT.md) for the full agent reference.
+
 ## Quickstart
 
 ```bash

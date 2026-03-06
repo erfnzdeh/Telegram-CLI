@@ -26,7 +26,7 @@ def account_group() -> None:
 @click.option("--alias", default=None, help="Alias for this account.")
 @click.pass_context
 def account_add(ctx: click.Context, phone: str, alias: str | None) -> None:
-    """Authenticate a new Telegram account."""
+    """Authenticate a new Telegram account (interactive — requires human input)."""
     import asyncio
     from tlgr.core.client import ClientWrapper
 
