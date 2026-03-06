@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -32,7 +32,7 @@ def media_download(
     if out_dir:
         body["out_dir"] = out_dir
     result = ipc_request("POST", "/media/download", body=body)
-    output_result(result, fmt=ctx.obj.get("fmt", "human"), columns=["path", "msg_id"])
+    emit(ctx.obj, result, columns=["path", "msg_id"])
 
 
 @media_group.command("upload")
@@ -53,4 +53,4 @@ def media_upload(
     result = ipc_request("POST", "/media/upload", body={
         "chat": chat, "path": path, "caption": caption, "account": acct,
     })
-    output_result(result, fmt=ctx.obj.get("fmt", "human"), columns=["id", "chat_id"])
+    emit(ctx.obj, result, columns=["id", "chat_id"])

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -22,13 +22,9 @@ def contact_list(ctx: click.Context, account: str | None) -> None:
     result = ipc_request("GET", f"/contact/list?account={acct}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        output_result(result, fmt=fmt)
+        emit(ctx.obj, result)
     else:
-        output_result(
-            result.get("contacts", []),
-            fmt=fmt,
-            columns=["id", "name", "username", "phone"],
-        )
+        emit(ctx.obj, result.get("contacts", []), columns=["id", "name", "username", "phone"])
 
 
 @contact_group.command("add")
@@ -40,7 +36,7 @@ def contact_add(ctx: click.Context, phone: str, name: str, account: str | None) 
     """Add a contact by phone number."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("POST", "/contact/add", body={"phone": phone, "name": name, "account": acct})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @contact_group.command("remove")
@@ -50,8 +46,11 @@ def contact_add(ctx: click.Context, phone: str, name: str, account: str | None) 
 def contact_remove(ctx: click.Context, user: str, account: str | None) -> None:
     """Remove a contact."""
     acct = account or ctx.obj.get("account", "")
+    if ctx.obj.get("dry_run"):
+        emit(ctx.obj, {"dry_run": True, "op": "contact.remove", "user": user})
+        return
     result = ipc_request("POST", "/contact/remove", body={"user": user, "account": acct})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @contact_group.command("search")
@@ -64,6 +63,6 @@ def contact_search(ctx: click.Context, query: str, account: str | None) -> None:
     result = ipc_request("GET", f"/contact/search?query={query}&account={acct}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        output_result(result, fmt=fmt)
+        emit(ctx.obj, result)
     else:
-        output_result(result.get("contacts", []), fmt=fmt, columns=["id", "name", "username"])
+        emit(ctx.obj, result.get("contacts", []), columns=["id", "name", "username"])

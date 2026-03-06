@@ -9,7 +9,7 @@ import click
 
 from tlgr.core.accounts import AccountManager
 from tlgr.core.config import CONFIG_DIR
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 
 
 def _get_mgr() -> AccountManager:
@@ -57,10 +57,9 @@ def account_add(ctx: click.Context, phone: str, alias: str | None) -> None:
         return me
 
     me = asyncio.run(_login())
-    fmt = ctx.obj.get("fmt", "human")
-    output_result(
+    emit(
+        ctx.obj,
         {"alias": alias, "user_id": me.id, "name": me.first_name, "username": me.username},
-        fmt=fmt,
         columns=["alias", "user_id", "name", "username"],
     )
 
@@ -82,7 +81,7 @@ def account_list(ctx: click.Context) -> None:
         })
     if not rows:
         rows = [{"alias": "(no accounts)", "user_id": "", "name": "", "phone": ""}]
-    output_result(rows, fmt=ctx.obj.get("fmt", "human"), columns=["alias", "user_id", "name", "phone"])
+    emit(ctx.obj, rows, columns=["alias", "user_id", "name", "phone"])
 
 
 @account_group.command("switch")
@@ -94,7 +93,7 @@ def account_switch(ctx: click.Context, alias: str) -> None:
     if not mgr.set_active(alias):
         click.echo(f"Account '{alias}' not found", err=True)
         sys.exit(1)
-    output_result({"active": alias}, fmt=ctx.obj.get("fmt", "human"), columns=["active"])
+    emit(ctx.obj, {"active": alias}, columns=["active"])
 
 
 @account_group.command("remove")
@@ -107,7 +106,7 @@ def account_remove(ctx: click.Context, alias: str) -> None:
     if not mgr.remove_account(alias):
         click.echo(f"Account '{alias}' not found", err=True)
         sys.exit(1)
-    output_result({"removed": alias}, fmt=ctx.obj.get("fmt", "human"), columns=["removed"])
+    emit(ctx.obj, {"removed": alias}, columns=["removed"])
 
 
 @account_group.command("rename")
@@ -120,7 +119,7 @@ def account_rename(ctx: click.Context, old: str, new: str) -> None:
     if not mgr.rename_account(old, new):
         click.echo(f"Account '{old}' not found", err=True)
         sys.exit(1)
-    output_result({"old": old, "new": new}, fmt=ctx.obj.get("fmt", "human"), columns=["old", "new"])
+    emit(ctx.obj, {"old": old, "new": new}, columns=["old", "new"])
 
 
 @account_group.command("info")
@@ -138,7 +137,7 @@ def account_info(ctx: click.Context, alias: str | None) -> None:
     if acct is None:
         click.echo(f"Account '{alias}' not found", err=True)
         sys.exit(1)
-    output_result(acct.to_dict(), fmt=ctx.obj.get("fmt", "human"), columns=["alias", "user_id", "username", "first_name", "phone", "created_at"])
+    emit(ctx.obj, acct.to_dict(), columns=["alias", "user_id", "username", "first_name", "phone", "created_at"])
 
 
 @account_group.command("sync")
@@ -168,5 +167,4 @@ def account_sync(ctx: click.Context, alias: str | None) -> None:
         user_id=profile.get("id"),
     )
     updated = mgr.get_account(alias)
-    fmt = ctx.obj.get("fmt", "human")
-    output_result(updated.to_dict(), fmt=fmt, columns=["alias", "user_id", "username", "first_name", "phone"])
+    emit(ctx.obj, updated.to_dict(), columns=["alias", "user_id", "username", "first_name", "phone"])

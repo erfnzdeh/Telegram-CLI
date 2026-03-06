@@ -8,7 +8,7 @@ from typing import Any
 import click
 
 from tlgr.core.config import CONFIG_DIR, load_app_config, load_webhook_config, _load_toml, _save_toml
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.gateway.config import load_gateway_configs
 
 if sys.version_info >= (3, 11):
@@ -99,11 +99,10 @@ def config_init(ctx: click.Context) -> None:
         )
         created.append("webhook.toml")
 
-    fmt = ctx.obj.get("fmt", "human")
     if created:
-        output_result({"created": created, "path": str(CONFIG_DIR)}, fmt=fmt)
+        emit(ctx.obj, {"created": created, "path": str(CONFIG_DIR)})
     else:
-        output_result({"message": "All config files already exist", "path": str(CONFIG_DIR)}, fmt=fmt)
+        emit(ctx.obj, {"message": "All config files already exist", "path": str(CONFIG_DIR)})
 
 
 @config_group.command("validate")
@@ -136,49 +135,49 @@ def config_validate(ctx: click.Context) -> None:
     except Exception as e:
         errors.append(f"webhook.toml: {e}")
 
-    fmt = ctx.obj.get("fmt", "human")
     if errors:
-        output_result({"valid": False, "errors": errors}, fmt=fmt)
+        emit(ctx.obj, {"valid": False, "errors": errors})
         sys.exit(1)
     else:
-        output_result({"valid": True, "files": ["config.toml", "jobs.yaml", "webhook.toml"]}, fmt=fmt)
+        emit(ctx.obj, {"valid": True, "files": ["config.toml", "jobs.yaml", "webhook.toml"]})
 
 
 @config_group.command("path")
 @click.pass_context
 def config_path(ctx: click.Context) -> None:
     """Print the configuration directory path."""
-    fmt = ctx.obj.get("fmt", "human") if ctx.obj else "human"
-    output_result({"path": str(CONFIG_DIR)}, fmt=fmt, columns=["path"])
+    emit(ctx.obj or {}, {"path": str(CONFIG_DIR)}, columns=["path"])
 
 
 @config_group.command("keys")
 @click.pass_context
 def config_keys(ctx: click.Context) -> None:
     """List all known configuration keys."""
-    fmt = ctx.obj.get("fmt", "human") if ctx.obj else "human"
+    obj = ctx.obj or {}
+    fmt = obj.get("fmt", "human")
     if fmt == "json":
         rows = {k: {"section": sec, "key": key, "description": desc} for k, (sec, key, desc) in _KNOWN_KEYS.items()}
-        output_result({"keys": rows}, fmt=fmt)
+        emit(obj, {"keys": rows})
     else:
         rows = [{"key": k, "section": sec, "description": desc} for k, (sec, _, desc) in _KNOWN_KEYS.items()]
-        output_result(rows, fmt=fmt, columns=["key", "section", "description"])
+        emit(obj, rows, columns=["key", "section", "description"])
 
 
 @config_group.command("list")
 @click.pass_context
 def config_list(ctx: click.Context) -> None:
     """List all config values."""
-    fmt = ctx.obj.get("fmt", "human") if ctx.obj else "human"
+    obj = ctx.obj or {}
+    fmt = obj.get("fmt", "human")
     raw = _load_toml(_CONFIG_FILE)
     if fmt == "json":
-        output_result(raw, fmt=fmt)
+        emit(obj, raw)
     else:
         rows = []
         for key_name, (section, field, _desc) in _KNOWN_KEYS.items():
             val = raw.get(section, {}).get(field, "")
             rows.append({"key": key_name, "value": str(val)})
-        output_result(rows, fmt=fmt, columns=["key", "value"])
+        emit(obj, rows, columns=["key", "value"])
 
 
 @config_group.command("get")
@@ -186,14 +185,13 @@ def config_list(ctx: click.Context) -> None:
 @click.pass_context
 def config_get(ctx: click.Context, key: str) -> None:
     """Get a config value by key."""
-    fmt = ctx.obj.get("fmt", "human") if ctx.obj else "human"
     if key not in _KNOWN_KEYS:
         click.echo(f"Error: unknown config key {key!r}. Run: tlgr config keys", err=True)
         sys.exit(2)
     section, field, _ = _KNOWN_KEYS[key]
     raw = _load_toml(_CONFIG_FILE)
     val = raw.get(section, {}).get(field)
-    output_result({"key": key, "value": val}, fmt=fmt, columns=["key", "value"])
+    emit(ctx.obj or {}, {"key": key, "value": val}, columns=["key", "value"])
 
 
 @config_group.command("set")
@@ -202,7 +200,6 @@ def config_get(ctx: click.Context, key: str) -> None:
 @click.pass_context
 def config_set(ctx: click.Context, key: str, value: str) -> None:
     """Set a config value."""
-    fmt = ctx.obj.get("fmt", "human") if ctx.obj else "human"
     if key not in _KNOWN_KEYS:
         click.echo(f"Error: unknown config key {key!r}. Run: tlgr config keys", err=True)
         sys.exit(2)
@@ -212,7 +209,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
         raw[section] = {}
     raw[section][field] = _coerce_value(value)
     _save_toml(_CONFIG_FILE, raw)
-    output_result({"key": key, "value": raw[section][field], "updated": True}, fmt=fmt)
+    emit(ctx.obj or {}, {"key": key, "value": raw[section][field], "updated": True})
 
 
 @config_group.command("unset")
@@ -220,7 +217,6 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 @click.pass_context
 def config_unset(ctx: click.Context, key: str) -> None:
     """Remove a config key (reset to default)."""
-    fmt = ctx.obj.get("fmt", "human") if ctx.obj else "human"
     if key not in _KNOWN_KEYS:
         click.echo(f"Error: unknown config key {key!r}. Run: tlgr config keys", err=True)
         sys.exit(2)
@@ -233,4 +229,4 @@ def config_unset(ctx: click.Context, key: str) -> None:
             del raw[section]
         removed = True
         _save_toml(_CONFIG_FILE, raw)
-    output_result({"key": key, "removed": removed}, fmt=fmt)
+    emit(ctx.obj or {}, {"key": key, "removed": removed})

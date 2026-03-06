@@ -6,7 +6,7 @@ import sys
 
 import click
 
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -48,8 +48,11 @@ def message_send(
         body["caption"] = caption
     if reply_to:
         body["reply_to"] = reply_to
+    if ctx.obj.get("dry_run"):
+        emit(ctx.obj, {"dry_run": True, "op": "message.send", **body})
+        return
     result = ipc_request("POST", "/message/send", body=body)
-    output_result(result, fmt=ctx.obj.get("fmt", "human"), columns=["id", "chat_id", "date"])
+    emit(ctx.obj, result, columns=["id", "chat_id", "date"])
 
 
 @message_group.command("list")
@@ -87,9 +90,9 @@ def message_list(
     result = ipc_request("GET", f"/message/list?{params}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        output_result(result, fmt=fmt)
+        emit(ctx.obj, result)
     else:
-        output_result(result.get("messages", []), fmt=fmt, columns=["id", "date", "text"])
+        emit(ctx.obj, result.get("messages", []), columns=["id", "date", "text"])
 
 
 @message_group.command("get")
@@ -101,7 +104,7 @@ def message_get(ctx: click.Context, chat: str, msg_id: int, account: str | None)
     """Get a single message with full metadata."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("GET", f"/message/get?chat={chat}&msg_id={msg_id}&account={acct}")
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @message_group.command("delete")
@@ -112,10 +115,13 @@ def message_get(ctx: click.Context, chat: str, msg_id: int, account: str | None)
 def message_delete(ctx: click.Context, chat: str, msg_ids: tuple[int, ...], account: str | None) -> None:
     """Delete messages from a chat."""
     acct = account or ctx.obj.get("account", "")
+    if ctx.obj.get("dry_run"):
+        emit(ctx.obj, {"dry_run": True, "op": "message.delete", "chat": chat, "msg_ids": list(msg_ids)})
+        return
     result = ipc_request("POST", "/message/delete", body={
         "chat": chat, "msg_ids": list(msg_ids), "account": acct,
     })
-    output_result(result, fmt=ctx.obj.get("fmt", "human"), columns=["deleted"])
+    emit(ctx.obj, result, columns=["deleted"])
 
 
 @message_group.command("search")
@@ -145,9 +151,9 @@ def message_search(
     result = ipc_request("GET", f"/message/search?{params}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        output_result(result, fmt=fmt)
+        emit(ctx.obj, result)
     else:
-        output_result(result.get("messages", []), fmt=fmt, columns=["id", "date", "text"])
+        emit(ctx.obj, result.get("messages", []), columns=["id", "date", "text"])
 
 
 @message_group.command("pin")
@@ -159,7 +165,7 @@ def message_pin(ctx: click.Context, chat: str, msg_id: int, account: str | None)
     """Pin a message in a chat."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("POST", "/message/pin", body={"chat": chat, "msg_id": msg_id, "account": acct})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @message_group.command("react")
@@ -172,4 +178,4 @@ def message_react(ctx: click.Context, chat: str, msg_id: int, emoji: str, accoun
     """React to a message with an emoji."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("POST", "/message/react", body={"chat": chat, "msg_id": msg_id, "emoji": emoji, "account": acct})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)

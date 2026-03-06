@@ -8,7 +8,7 @@ import sys
 import click
 
 from tlgr.core.config import CONFIG_DIR
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -24,13 +24,9 @@ def job_list(ctx: click.Context) -> None:
     result = ipc_request("GET", "/job/list")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        output_result(result, fmt=fmt)
+        emit(ctx.obj, result)
     else:
-        output_result(
-            result.get("jobs", []),
-            fmt=fmt,
-            columns=["name", "type", "enabled", "running"],
-        )
+        emit(ctx.obj, result.get("jobs", []), columns=["name", "type", "enabled", "running"])
 
 
 @job_group.command("add")
@@ -60,7 +56,7 @@ def job_add() -> None:
 def job_remove(ctx: click.Context, name: str) -> None:
     """Remove a job by name."""
     result = ipc_request("POST", "/job/remove", body={"name": name})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @job_group.command("enable")
@@ -69,7 +65,7 @@ def job_remove(ctx: click.Context, name: str) -> None:
 def job_enable(ctx: click.Context, name: str) -> None:
     """Enable a disabled job."""
     result = ipc_request("POST", "/job/enable", body={"name": name})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @job_group.command("disable")
@@ -78,4 +74,4 @@ def job_enable(ctx: click.Context, name: str) -> None:
 def job_disable(ctx: click.Context, name: str) -> None:
     """Disable a job without removing it."""
     result = ipc_request("POST", "/job/disable", body={"name": name})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)

@@ -11,7 +11,7 @@ import time
 import click
 
 from tlgr.core.config import CONFIG_DIR, get_socket_path, get_pid_path, get_logs_dir
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.daemon.lifecycle import read_pid, stop_daemon
 
 
@@ -52,8 +52,7 @@ def daemon_start(ctx: click.Context, foreground: bool) -> None:
             time.sleep(0.25)
             if sock.exists():
                 pid = read_pid()
-                fmt = ctx.obj.get("fmt", "human")
-                output_result({"started": True, "pid": pid or proc.pid}, fmt=fmt)
+                emit(ctx.obj, {"started": True, "pid": pid or proc.pid})
                 return
         click.echo("Daemon did not start within 10 seconds", err=True)
         sys.exit(1)
@@ -68,7 +67,7 @@ def daemon_stop(ctx: click.Context) -> None:
             time.sleep(0.25)
             if not get_pid_path().exists():
                 break
-        output_result({"stopped": True}, fmt=ctx.obj.get("fmt", "human"))
+        emit(ctx.obj, {"stopped": True})
     else:
         click.echo("Daemon is not running", err=True)
         sys.exit(1)
@@ -96,8 +95,7 @@ def daemon_restart(ctx: click.Context) -> None:
         time.sleep(0.25)
         if sock.exists():
             pid = read_pid()
-            fmt = ctx.obj.get("fmt", "human")
-            output_result({"restarted": True, "pid": pid or proc.pid}, fmt=fmt)
+            emit(ctx.obj, {"restarted": True, "pid": pid or proc.pid})
             return
     click.echo("Daemon did not start within 10 seconds", err=True)
     sys.exit(1)
@@ -122,8 +120,7 @@ def daemon_install(ctx: click.Context, force: bool) -> None:
         sys.exit(1)
 
     plist_path = install(CONFIG_DIR, get_logs_dir())
-    fmt = ctx.obj.get("fmt", "human")
-    output_result({"installed": True, "plist": str(plist_path)}, fmt=fmt)
+    emit(ctx.obj, {"installed": True, "plist": str(plist_path)})
 
 
 @daemon_group.command("uninstall")
@@ -137,7 +134,7 @@ def daemon_uninstall(ctx: click.Context) -> None:
     from tlgr.daemon.launchd import uninstall
 
     if uninstall():
-        output_result({"uninstalled": True}, fmt=ctx.obj.get("fmt", "human"))
+        emit(ctx.obj, {"uninstalled": True})
     else:
         click.echo("Service is not installed.", err=True)
         sys.exit(1)
@@ -152,11 +149,11 @@ def daemon_status(ctx: click.Context) -> None:
         try:
             from tlgr.ipc_client import ipc_request
             result = ipc_request("GET", "/daemon/status")
-            output_result(result, fmt=ctx.obj.get("fmt", "human"), columns=["running", "pid", "uptime_seconds", "accounts"])
+            emit(ctx.obj, result, columns=["running", "pid", "uptime_seconds", "accounts"])
         except Exception:
-            output_result({"running": True, "pid": pid, "uptime_seconds": "?", "accounts": "?"}, fmt=ctx.obj.get("fmt", "human"))
+            emit(ctx.obj, {"running": True, "pid": pid, "uptime_seconds": "?", "accounts": "?"})
     else:
-        output_result({"running": False}, fmt=ctx.obj.get("fmt", "human"), columns=["running"])
+        emit(ctx.obj, {"running": False}, columns=["running"])
 
 
 @daemon_group.command("logs")

@@ -179,3 +179,11 @@ def output_result(
         output_plain(data, cols)
     else:
         output_human(data, cols, headers=headers)
+
+
+def emit(ctx_obj: dict[str, Any], data: Any, **kwargs: Any) -> None:
+    """Convenience wrapper: ``output_result`` with global transforms from *ctx.obj*."""
+    kwargs.setdefault("fmt", ctx_obj.get("fmt", "human"))
+    kwargs.setdefault("results_only", ctx_obj.get("results_only", False))
+    kwargs.setdefault("select", ctx_obj.get("select"))
+    output_result(data, **kwargs)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -38,11 +38,11 @@ def chat_list(
     result = ipc_request("GET", f"/chat/list?{params}")
     fmt = ctx.obj.get("fmt", "human")
     if fmt == "json":
-        output_result(result, fmt=fmt)
+        emit(ctx.obj, result)
     else:
-        output_result(
+        emit(
+            ctx.obj,
             result.get("chats", []),
-            fmt=fmt,
             columns=["id", "name", "type", "username"],
             headers=["ID", "Name", "Type", "Username"],
         )
@@ -56,7 +56,7 @@ def chat_get(ctx: click.Context, chat: str, account: str | None) -> None:
     """Get chat info (members, permissions, etc.)."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("GET", f"/chat/get?chat={chat}&account={acct}")
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @chat_group.command("create")
@@ -77,7 +77,7 @@ def chat_create(
     result = ipc_request("POST", "/chat/create", body={
         "name": name, "type": chat_type, "members": list(members), "account": acct,
     })
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @chat_group.command("archive")
@@ -87,8 +87,11 @@ def chat_create(
 def chat_archive(ctx: click.Context, chat: str, account: str | None) -> None:
     """Archive a chat."""
     acct = account or ctx.obj.get("account", "")
+    if ctx.obj.get("dry_run"):
+        emit(ctx.obj, {"dry_run": True, "op": "chat.archive", "chat": chat})
+        return
     result = ipc_request("POST", "/chat/archive", body={"chat": chat, "account": acct})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @chat_group.command("mute")
@@ -100,7 +103,7 @@ def chat_mute(ctx: click.Context, chat: str, duration: int | None, account: str 
     """Mute a chat. Duration in seconds (omit for permanent)."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("POST", "/chat/mute", body={"chat": chat, "duration": duration, "account": acct})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
 
 
 @chat_group.command("leave")
@@ -110,5 +113,8 @@ def chat_mute(ctx: click.Context, chat: str, duration: int | None, account: str 
 def chat_leave(ctx: click.Context, chat: str, account: str | None) -> None:
     """Leave a chat or group."""
     acct = account or ctx.obj.get("account", "")
+    if ctx.obj.get("dry_run"):
+        emit(ctx.obj, {"dry_run": True, "op": "chat.leave", "chat": chat})
+        return
     result = ipc_request("POST", "/chat/leave", body={"chat": chat, "account": acct})
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)

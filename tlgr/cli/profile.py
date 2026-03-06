@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from tlgr.core.output import output_result
+from tlgr.core.output import emit
 from tlgr.ipc_client import ipc_request
 
 
@@ -20,7 +20,7 @@ def profile_get(ctx: click.Context, account: str | None) -> None:
     """Show your current profile."""
     acct = account or ctx.obj.get("account", "")
     result = ipc_request("GET", f"/profile/get?account={acct}")
-    output_result(result, fmt=ctx.obj.get("fmt", "human"), columns=["id", "first_name", "last_name", "username", "phone"])
+    emit(ctx.obj, result, columns=["id", "first_name", "last_name", "username", "phone"])
 
 
 @profile_group.command("update")
@@ -50,4 +50,4 @@ def profile_update(
     if photo is not None:
         body["photo"] = photo
     result = ipc_request("POST", "/profile/update", body=body)
-    output_result(result, fmt=ctx.obj.get("fmt", "human"))
+    emit(ctx.obj, result)
