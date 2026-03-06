@@ -30,20 +30,30 @@ def _daemon_is_running(base: Path | None = None) -> int | None:
 
 
 def _auto_start_daemon(base: Path | None = None) -> None:
-    """Fork and start the daemon in background."""
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "tlgr.daemon.server", "--base", str(base or CONFIG_DIR)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+    """Fork and start the daemon in background with retry."""
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "tlgr.daemon.server", "--base", str(base or CONFIG_DIR)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        sock_path = get_socket_path(base)
+        wait = 0.1
+        for _ in range(50):
+            time.sleep(wait)
+            if sock_path.exists():
+                return
+            wait = min(wait * 1.3, 0.5)
+        if attempt < max_retries:
+            pid_path = get_pid_path(base)
+            pid_path.unlink(missing_ok=True)
+            continue
+    raise DaemonError(
+        "Daemon did not start after retries. "
+        "Check logs with: tlgr daemon logs"
     )
-    # Wait briefly for the socket to appear
-    sock_path = get_socket_path(base)
-    for _ in range(40):
-        time.sleep(0.25)
-        if sock_path.exists():
-            return
-    raise DaemonError("Daemon did not start within 10 seconds")
 
 
 def _ensure_daemon(base: Path | None = None) -> None:

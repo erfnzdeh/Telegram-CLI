@@ -52,6 +52,8 @@ class Defaults:
 class DaemonConfig:
     auto_start: bool = True
     log_level: str = "info"
+    idle_timeout: int = 1800
+    flood_wait_max: int = 120
 
 
 @dataclass
@@ -207,6 +209,8 @@ def load_app_config(base: Path | None = None) -> AppConfig:
     cfg.daemon = DaemonConfig(
         auto_start=daemon_raw.get("auto_start", True),
         log_level=daemon_raw.get("log_level", "info"),
+        idle_timeout=daemon_raw.get("idle_timeout", 1800),
+        flood_wait_max=daemon_raw.get("flood_wait_max", 120),
     )
 
     cfg.default_account = raw.get("accounts", {}).get("default", "")

@@ -41,6 +41,8 @@ class DaemonServer:
         self._ipc: IPCServer | None = None
         self._shutdown_event = asyncio.Event()
         self._start_time = time.time()
+        self._last_ipc_time = time.time()
+        self._idle_timeout: int = 1800  # 30 minutes default
 
     # -- Client management --
 
@@ -58,7 +60,8 @@ class DaemonServer:
             log.warning("No credentials for account '%s'", alias)
             return None
         session_path = acct_mgr.get_session_path(alias)
-        client = ClientWrapper(session_path, api_id, api_hash)
+        flood_max = getattr(self, '_flood_wait_max', 120)
+        client = ClientWrapper(session_path, api_id, api_hash, flood_wait_max=flood_max)
         authorized = await client.connect()
         if not authorized:
             log.warning("Account '%s' not authorized — run 'tlgr account add' first", alias)
@@ -183,6 +186,10 @@ class DaemonServer:
 
     # -- Status & shutdown --
 
+    def touch_ipc(self) -> None:
+        """Update the last IPC activity timestamp."""
+        self._last_ipc_time = time.time()
+
     def status(self) -> dict[str, Any]:
         uptime = int(time.time() - self._start_time)
         return {
@@ -196,6 +203,19 @@ class DaemonServer:
     def request_shutdown(self) -> None:
         self._shutdown_event.set()
 
+    async def _idle_monitor(self) -> None:
+        """Shut down daemon if idle (no jobs + no recent IPC) for idle_timeout."""
+        if self._idle_timeout <= 0:
+            return
+        while not self._shutdown_event.is_set():
+            await asyncio.sleep(60)
+            active_jobs = [j for j in self._job_runner.list_jobs() if j.get("running")]
+            idle_seconds = time.time() - self._last_ipc_time
+            if not active_jobs and idle_seconds >= self._idle_timeout:
+                log.info("Daemon idle for %ds with no active jobs — shutting down", int(idle_seconds))
+                self.request_shutdown()
+                return
+
     # -- Main run loop --
 
     async def run(self) -> None:
@@ -204,6 +224,8 @@ class DaemonServer:
 
         # Load configs
         app_config = load_app_config(self.base)
+        self._flood_wait_max = app_config.daemon.flood_wait_max
+        self._idle_timeout = app_config.daemon.idle_timeout
         job_configs = load_gateway_configs(self.base)
         webhook_config = load_webhook_config(self.base)
 
@@ -275,12 +297,19 @@ class DaemonServer:
         self._ipc = IPCServer(self, sock_path)
         await self._ipc.start()
 
+        # Load idle timeout from config
+        idle_raw = app_config.daemon.__dict__.get("idle_timeout")
+        if idle_raw is not None:
+            self._idle_timeout = int(idle_raw)
+
         log.info("Daemon ready — %d accounts, %d jobs", len(self._clients), len(job_configs))
 
         # Wait for shutdown signal
         loop = asyncio.get_event_loop()
         loop.add_signal_handler(signal.SIGTERM, self.request_shutdown)
         loop.add_signal_handler(signal.SIGINT, self.request_shutdown)
+
+        asyncio.create_task(self._idle_monitor())
 
         await self._shutdown_event.wait()
 

@@ -107,6 +107,10 @@ class TlgrGroup(click.Group):
     help="Skip confirmations for destructive commands.",
 )
 @click.option(
+    "--flood-wait-max", type=int, default=None,
+    help="Max seconds to auto-sleep on rate limit (default from config).",
+)
+@click.option(
     "--no-input", is_flag=True, default=False,
     help="Never prompt; fail instead (CI/agent mode).",
 )
@@ -124,6 +128,7 @@ def cli(
     results_only: bool,
     select_fields: str | None,
     dry_run: bool,
+    flood_wait_max: int | None,
     force: bool,
     no_input: bool,
     verbose: bool,
@@ -152,6 +157,7 @@ def cli(
     ctx.obj["results_only"] = results_only
     ctx.obj["select"] = select_fields
     ctx.obj["dry_run"] = dry_run
+    ctx.obj["flood_wait_max"] = flood_wait_max
     ctx.obj["force"] = force
     ctx.obj["no_input"] = no_input
     ctx.obj["verbose"] = verbose

@@ -52,7 +52,7 @@ class IPCServer:
         self._runner: web.AppRunner | None = None
 
     async def start(self) -> None:
-        app = web.Application()
+        app = web.Application(middlewares=[self._touch_middleware])
         self._register_routes(app)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -63,6 +63,11 @@ class IPCServer:
     async def stop(self) -> None:
         if self._runner:
             await self._runner.cleanup()
+
+    @web.middleware
+    async def _touch_middleware(self, request: web.Request, handler):
+        self.daemon.touch_ipc()
+        return await handler(request)
 
     def _register_routes(self, app: web.Application) -> None:
         # Daemon
