@@ -10,9 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from tlgr.core.config import CONFIG_DIR
+from tlgr.core.errors import ConfigurationError
 from tlgr.filters.compose import FilterNode, parse_filter_config
 from tlgr.processors import ProcessorChain, create_chain_from_list
 
@@ -109,6 +108,13 @@ def load_gateway_configs(base: Path | None = None) -> list[GatewayConfig]:
     if not jobs_path.exists():
         return []
 
+    try:
+        import yaml
+    except ModuleNotFoundError as e:
+        raise ConfigurationError(
+            "PyYAML is required for jobs.yaml support. Install with: pip install pyyaml"
+        ) from e
+
     with open(jobs_path, "r") as f:
         data = yaml.safe_load(f)
 
@@ -123,6 +129,13 @@ def save_gateway_configs(configs: list[GatewayConfig], base: Path | None = None)
     base = base or CONFIG_DIR
     base.mkdir(parents=True, exist_ok=True)
     jobs_path = base / "jobs.yaml"
+
+    try:
+        import yaml
+    except ModuleNotFoundError as e:
+        raise ConfigurationError(
+            "PyYAML is required for jobs.yaml support. Install with: pip install pyyaml"
+        ) from e
 
     jobs_list: list[dict[str, Any]] = []
     for cfg in configs:
