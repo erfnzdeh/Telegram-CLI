@@ -13,10 +13,11 @@ pip install tlgr
 
 ```bash
 tlgr config init                              # create config files
-tlgr account add +15551234567                  # authenticate
+tlgr login +15551234567                       # authenticate (shortcut for account add)
 tlgr daemon start                             # start background daemon
-tlgr message send @username "Hello from tlgr" # send a message
-tlgr chat list --limit 20                     # list your chats
+tlgr send @username "Hello from tlgr"         # send a message
+tlgr chats --limit 20                         # list your chats
+tlgr status                                   # check daemon status
 ```
 
 ## CLI
@@ -31,6 +32,21 @@ flowchart LR
     DAEMON --> TG
 ```
 
+### Shortcuts
+
+Common operations are available as top-level commands for quick access:
+
+```bash
+tlgr send <chat> <text>                # message send
+tlgr login <phone>                     # account add
+tlgr logout <alias>                    # account remove
+tlgr status                            # daemon status
+tlgr chats                             # chat list
+tlgr contacts                          # contact list
+tlgr dl <chat> <msg_id>               # media download
+tlgr up <chat> <path>                 # media upload
+```
+
 ### Messages
 
 ```bash
@@ -42,6 +58,8 @@ tlgr message search <chat> <query>     # --local for regex, --regex <pattern>
 tlgr message pin <chat> <msg_id>
 tlgr message react <chat> <id> <emoji>
 ```
+
+`msg` is an alias for `message` (e.g. `tlgr msg send @user "hello"`).
 
 ### Chats
 
@@ -100,11 +118,30 @@ tlgr daemon logs                      # --follow
 ### Global Flags
 
 ```
---json              JSON to stdout (for scripting and agents)
---plain             Stable TSV for piping
--a, --account TEXT  Account alias to use
+--json               JSON to stdout (for scripting and agents)
+--plain              Stable TSV for piping
+-a, --account TEXT   Account alias to use
+--results-only       In JSON mode, strip envelope and emit only the primary result
+--select FIELDS      In JSON mode, project comma-separated fields (supports dot paths)
+--enable-commands    Comma-separated allowlist of enabled commands (sandboxing)
+-n, --dry-run        Preview destructive operations without executing
+-y, --force          Skip confirmations
+--no-input           Never prompt; fail instead (CI/agent mode)
+-v, --verbose        Verbose logging to stderr
 --version / --help
 ```
+
+### Environment Variables
+
+All global flags can be set via environment variables:
+
+| Variable | Equivalent |
+|----------|------------|
+| `TLGR_JSON=1` | `--json` |
+| `TLGR_PLAIN=1` | `--plain` |
+| `TLGR_ACCOUNT=alias` | `--account alias` |
+| `TLGR_ENABLE_COMMANDS=cmd1,cmd2` | `--enable-commands cmd1,cmd2` |
+| `TLGR_AUTO_JSON=1` | Auto-switch to JSON when stdout is piped (non-TTY) |
 
 ## Webhook -- Event Push
 
@@ -197,6 +234,73 @@ Filters support full AND / OR / NOT composition, 20+ built-in filter types, 7 te
 
 For the full Gateway reference -- filters, processors, actions, composition, extensibility -- see **[Gateway documentation](tlgr/gateway/README.md)**.
 
+## Agent / Automation
+
+tlgr is designed to be consumed by LLM agents and automation pipelines.
+
+### Machine-readable schema
+
+```bash
+tlgr schema                            # full CLI schema as JSON
+tlgr schema message send               # schema for a specific command
+```
+
+Agents can discover all commands, flags, positionals, types, and defaults without parsing `--help`.
+
+### Stable exit codes
+
+```bash
+tlgr exit-codes                        # print the exit code table
+tlgr --json agent exit-codes           # as JSON
+```
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Generic failure |
+| 2 | Usage / parse error |
+| 3 | Empty results |
+| 4 | Auth required |
+| 5 | Not found |
+| 6 | Permission denied |
+| 7 | Rate limited |
+| 8 | Retryable error |
+| 10 | Config error |
+| 11 | Daemon error |
+| 12 | IPC error |
+| 130 | Interrupted (SIGINT) |
+
+### Command sandboxing
+
+Restrict which commands an agent can run:
+
+```bash
+tlgr --enable-commands="message,chat,schema" send @user "hi"    # allowed
+tlgr --enable-commands="message,chat,schema" account remove foo  # blocked (exit 2)
+```
+
+Or via environment: `TLGR_ENABLE_COMMANDS=message,chat,schema`.
+
+### JSON transforms
+
+```bash
+tlgr --json --results-only chat list           # strip pagination/envelope, emit only the chat array
+tlgr --json --select "id,name" chat list       # project specific fields
+```
+
+### Auto-JSON for pipelines
+
+Set `TLGR_AUTO_JSON=1` and tlgr automatically outputs JSON whenever stdout is piped (non-TTY), without requiring `--json`.
+
+### Error hints
+
+Errors include actionable recovery hints:
+
+```
+Error: No session found for account 'main'
+  Session expired. Run: tlgr account add <phone>
+```
+
 ## Configuration
 
 Config files live in `~/.tlgr/`:
@@ -208,10 +312,14 @@ Config files live in `~/.tlgr/`:
 | `webhook.toml` | TOML | Outbound webhook push |
 
 ```bash
-tlgr config init       # create defaults
-tlgr config validate   # check syntax + validate filter/action names
-tlgr job add           # open jobs.yaml in $EDITOR
-tlgr job list          # show running jobs
+tlgr config init                       # create defaults
+tlgr config validate                   # check syntax + validate filter/action names
+tlgr config path                       # print config directory
+tlgr config keys                       # list all known config keys
+tlgr config list                       # show current values
+tlgr config get <key>                  # get a single value
+tlgr config set <key> <value>          # set a value
+tlgr config unset <key>                # reset to default
 ```
 
 ### config.toml

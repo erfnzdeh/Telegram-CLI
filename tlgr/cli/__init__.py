@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 import click
 
 from tlgr import __version__
-from tlgr.core.errors import TlgrError, emit_error
+from tlgr.core.errors import TlgrError, emit_error, exit_code_for
+
+
+def _env_bool(key: str) -> bool:
+    return os.environ.get(key, "").lower() in ("1", "true", "yes", "y", "on")
+
+
+def _env_or(key: str, fallback: str) -> str:
+    return os.environ.get(key, "") or fallback
 
 
 class TlgrGroup(click.Group):
-    """Custom group that handles errors and output formatting."""
+    """Custom group that handles errors, sandboxing, and output formatting."""
 
     def invoke(self, ctx: click.Context) -> None:
         try:
@@ -19,35 +28,129 @@ class TlgrGroup(click.Group):
         except TlgrError as e:
             use_json = ctx.params.get("json") or ctx.obj and ctx.obj.get("json")
             emit_error(e, use_json=bool(use_json))
-            sys.exit(1)
+            sys.exit(exit_code_for(e))
         except (click.ClickException, click.exceptions.Exit, SystemExit):
             raise
+        except KeyboardInterrupt:
+            sys.exit(130)
         except Exception as e:
             use_json = ctx.params.get("json") or ctx.obj and ctx.obj.get("json")
             emit_error(e, use_json=bool(use_json))
             sys.exit(1)
 
+    def resolve_command(self, ctx: click.Context, args: list[str]) -> tuple:
+        """Override to enforce --enable-commands before dispatching."""
+        cmd_name, cmd, rest = super().resolve_command(ctx, args)
+
+        enabled = ctx.params.get("enable_commands") or ""
+        enabled = enabled.strip()
+        if enabled:
+            allow = {p.strip().lower() for p in enabled.split(",") if p.strip()}
+            if allow and "*" not in allow and "all" not in allow:
+                if cmd_name and cmd_name.lower() not in allow:
+                    click.echo(
+                        f"Error: command {cmd_name!r} is not enabled "
+                        f"(set --enable-commands to allow it)",
+                        err=True,
+                    )
+                    sys.exit(2)
+
+        return cmd_name, cmd, rest
+
 
 @click.group(cls=TlgrGroup)
 @click.version_option(__version__, prog_name="tlgr")
-@click.option("--json", "use_json", is_flag=True, help="Output JSON to stdout.")
-@click.option("--plain", "use_plain", is_flag=True, help="Output stable TSV for piping.")
-@click.option("--account", "-a", default=None, help="Account alias to use.")
+@click.option(
+    "--json", "use_json", is_flag=True, default=_env_bool("TLGR_JSON"),
+    help="Output JSON to stdout.",
+)
+@click.option(
+    "--plain", "use_plain", is_flag=True, default=_env_bool("TLGR_PLAIN"),
+    help="Output stable TSV for piping.",
+)
+@click.option(
+    "--account", "-a", default=_env_or("TLGR_ACCOUNT", ""),
+    help="Account alias to use.",
+)
+@click.option(
+    "--enable-commands", default=_env_or("TLGR_ENABLE_COMMANDS", ""),
+    help="Comma-separated allowlist of enabled top-level commands (sandboxing).",
+)
+@click.option(
+    "--results-only", is_flag=True, default=False,
+    help="In JSON mode, emit only the primary result (strip envelope).",
+)
+@click.option(
+    "--select", "select_fields", default=None,
+    help="In JSON mode, select comma-separated fields (supports dot paths).",
+)
+@click.option(
+    "--dry-run", "-n", is_flag=True, default=False,
+    help="Preview destructive operations without executing.",
+)
+@click.option(
+    "--force", "-y", is_flag=True, default=False,
+    help="Skip confirmations for destructive commands.",
+)
+@click.option(
+    "--no-input", is_flag=True, default=False,
+    help="Never prompt; fail instead (CI/agent mode).",
+)
+@click.option(
+    "--verbose", "-v", is_flag=True, default=False,
+    help="Enable verbose logging to stderr.",
+)
 @click.pass_context
-def cli(ctx: click.Context, use_json: bool, use_plain: bool, account: str | None) -> None:
+def cli(
+    ctx: click.Context,
+    use_json: bool,
+    use_plain: bool,
+    account: str | None,
+    enable_commands: str,
+    results_only: bool,
+    select_fields: str | None,
+    dry_run: bool,
+    force: bool,
+    no_input: bool,
+    verbose: bool,
+) -> None:
     """tlgr — Full Telegram account control CLI."""
     ctx.ensure_object(dict)
+
+    # TLGR_AUTO_JSON: default to JSON when stdout is piped and env var is set
+    if _env_bool("TLGR_AUTO_JSON") and not use_json and not use_plain:
+        if not sys.stdout.isatty():
+            use_json = True
+
+    if use_json and use_plain:
+        click.echo("Error: cannot combine --json and --plain", err=True)
+        sys.exit(2)
+
     if use_json:
         ctx.obj["fmt"] = "json"
     elif use_plain:
         ctx.obj["fmt"] = "plain"
     else:
         ctx.obj["fmt"] = "human"
+
     ctx.obj["json"] = use_json
     ctx.obj["account"] = account or ""
+    ctx.obj["results_only"] = results_only
+    ctx.obj["select"] = select_fields
+    ctx.obj["dry_run"] = dry_run
+    ctx.obj["force"] = force
+    ctx.obj["no_input"] = no_input
+    ctx.obj["verbose"] = verbose
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stderr, format="%(levelname)s: %(message)s")
 
 
+# ---------------------------------------------------------------------------
 # Import and register sub-groups
+# ---------------------------------------------------------------------------
+
 from tlgr.cli.account import account_group  # noqa: E402
 from tlgr.cli.message import message_group  # noqa: E402
 from tlgr.cli.chat import chat_group  # noqa: E402
@@ -58,9 +161,12 @@ from tlgr.cli.daemon_cmd import daemon_group  # noqa: E402
 from tlgr.cli.job import job_group  # noqa: E402
 from tlgr.cli.config_cmd import config_group  # noqa: E402
 from tlgr.cli.completion import completion_group  # noqa: E402
+from tlgr.cli.schema import schema_command  # noqa: E402
+from tlgr.cli.agent import agent_group  # noqa: E402
 
 cli.add_command(account_group, "account")
 cli.add_command(message_group, "message")
+cli.add_command(message_group, "msg")
 cli.add_command(chat_group, "chat")
 cli.add_command(contact_group, "contact")
 cli.add_command(profile_group, "profile")
@@ -69,3 +175,115 @@ cli.add_command(daemon_group, "daemon")
 cli.add_command(job_group, "job")
 cli.add_command(config_group, "config")
 cli.add_command(completion_group, "completion")
+cli.add_command(schema_command, "schema")
+cli.add_command(agent_group, "agent")
+
+
+# ---------------------------------------------------------------------------
+# Top-level action shortcuts (desire paths)
+# ---------------------------------------------------------------------------
+
+@cli.command("send")
+@click.argument("chat")
+@click.argument("text", required=False, default="")
+@click.option("--file", "file_path", default=None, help="File to attach.")
+@click.option("--caption", default=None, help="Caption for file.")
+@click.option("--reply-to", type=int, default=None, help="Reply to message ID.")
+@click.option("--silent", is_flag=True, help="Send without notification.")
+@click.pass_context
+def shortcut_send(
+    ctx: click.Context,
+    chat: str,
+    text: str,
+    file_path: str | None,
+    caption: str | None,
+    reply_to: int | None,
+    silent: bool,
+) -> None:
+    """Send a message (shortcut for 'message send')."""
+    ctx.invoke(
+        message_group.commands["send"],
+        chat=chat, text=text, file_path=file_path, caption=caption,
+        reply_to=reply_to, silent=silent, account=ctx.obj.get("account"),
+    )
+
+
+@cli.command("login")
+@click.argument("phone")
+@click.option("--alias", default=None, help="Alias for this account.")
+@click.pass_context
+def shortcut_login(ctx: click.Context, phone: str, alias: str | None) -> None:
+    """Add and authenticate a Telegram account (shortcut for 'account add')."""
+    ctx.invoke(account_group.commands["add"], phone=phone, alias=alias)
+
+
+@cli.command("logout")
+@click.argument("alias")
+@click.pass_context
+def shortcut_logout(ctx: click.Context, alias: str) -> None:
+    """Remove an account (shortcut for 'account remove')."""
+    ctx.invoke(account_group.commands["remove"], alias=alias)
+
+
+@cli.command("status")
+@click.pass_context
+def shortcut_status(ctx: click.Context) -> None:
+    """Show daemon status (shortcut for 'daemon status')."""
+    ctx.invoke(daemon_group.commands["status"])
+
+
+@cli.command("chats")
+@click.option("--type", "chat_type", default=None, help="Filter: user, group, channel, bot.")
+@click.option("--search", "-s", default=None, help="Filter by name.")
+@click.option("--limit", "-n", type=int, default=None)
+@click.pass_context
+def shortcut_chats(ctx: click.Context, chat_type: str | None, search: str | None, limit: int | None) -> None:
+    """List all chats (shortcut for 'chat list')."""
+    ctx.invoke(
+        chat_group.commands["list"],
+        chat_type=chat_type, search=search, limit=limit,
+        account=ctx.obj.get("account"),
+    )
+
+
+@cli.command("contacts")
+@click.pass_context
+def shortcut_contacts(ctx: click.Context) -> None:
+    """List all contacts (shortcut for 'contact list')."""
+    ctx.invoke(contact_group.commands["list"], account=ctx.obj.get("account"))
+
+
+@cli.command("dl")
+@click.argument("chat")
+@click.argument("msg_id", type=int)
+@click.option("--out-dir", default=None, help="Output directory.")
+@click.pass_context
+def shortcut_download(ctx: click.Context, chat: str, msg_id: int, out_dir: str | None) -> None:
+    """Download media (shortcut for 'media download')."""
+    ctx.invoke(
+        media_group.commands["download"],
+        chat=chat, msg_id=msg_id, out_dir=out_dir,
+        account=ctx.obj.get("account"),
+    )
+
+
+@cli.command("up")
+@click.argument("chat")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--caption", default="", help="Caption for the file.")
+@click.pass_context
+def shortcut_upload(ctx: click.Context, chat: str, path: str, caption: str) -> None:
+    """Upload a file (shortcut for 'media upload')."""
+    ctx.invoke(
+        media_group.commands["upload"],
+        chat=chat, path=path, caption=caption,
+        account=ctx.obj.get("account"),
+    )
+
+
+# Top-level alias for exit-codes
+@cli.command("exit-codes", hidden=True)
+@click.pass_context
+def shortcut_exit_codes(ctx: click.Context) -> None:
+    """Print stable exit codes (shortcut for 'agent exit-codes')."""
+    ctx.invoke(agent_group.commands["exit-codes"])

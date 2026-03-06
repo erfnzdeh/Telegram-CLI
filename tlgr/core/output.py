@@ -12,13 +12,106 @@ def _tsv_escape(value: Any) -> str:
     return s.replace("\t", " ").replace("\n", " ")
 
 
-def output_json(data: Any, *, flood_wait: int | None = None) -> None:
+# ---------------------------------------------------------------------------
+# JSON transforms (--results-only, --select)
+# ---------------------------------------------------------------------------
+
+_ENVELOPE_KEYS = frozenset({
+    "next_page_token", "nextPageToken", "next_cursor", "has_more",
+    "count", "total", "query", "dry_run", "dryRun", "op", "action",
+})
+
+
+def _unwrap_primary(data: Any) -> Any:
+    """Strip envelope metadata and return only the primary result."""
+    if not isinstance(data, dict):
+        return data
+    if "results" in data:
+        return data["results"]
+
+    candidates = [k for k in data if k not in _ENVELOPE_KEYS]
+    if len(candidates) == 1:
+        return data[candidates[0]]
+
+    for k in candidates:
+        if isinstance(data[k], list):
+            return data[k]
+
+    return data
+
+
+def _get_at_path(obj: Any, path: str) -> tuple[Any, bool]:
+    """Traverse dot-delimited path into a nested dict/list."""
+    segments = [s.strip() for s in path.split(".") if s.strip()]
+    cur = obj
+    for seg in segments:
+        if isinstance(cur, dict):
+            if seg not in cur:
+                return None, False
+            cur = cur[seg]
+        elif isinstance(cur, list):
+            try:
+                cur = cur[int(seg)]
+            except (ValueError, IndexError):
+                return None, False
+        else:
+            return None, False
+    return cur, True
+
+
+def _select_fields(data: Any, fields: list[str]) -> Any:
+    """Project only selected fields from data."""
+    if isinstance(data, list):
+        return [_select_from_item(item, fields) for item in data]
+    return _select_from_item(data, fields)
+
+
+def _select_from_item(item: Any, fields: list[str]) -> Any:
+    if not isinstance(item, dict):
+        return item
+    out: dict[str, Any] = {}
+    for f in fields:
+        val, found = _get_at_path(item, f)
+        if found:
+            out[f] = val
+    return out
+
+
+def apply_json_transforms(
+    data: Any,
+    *,
+    results_only: bool = False,
+    select: str | None = None,
+) -> Any:
+    """Apply --results-only and --select transforms to JSON data."""
+    if results_only:
+        data = _unwrap_primary(data)
+    if select:
+        fields = [f.strip() for f in select.split(",") if f.strip()]
+        if fields:
+            data = _select_fields(data, fields)
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Core output functions
+# ---------------------------------------------------------------------------
+
+def output_json(
+    data: Any,
+    *,
+    flood_wait: int | None = None,
+    results_only: bool = False,
+    select: str | None = None,
+) -> None:
     """Write JSON to stdout."""
     if flood_wait:
         if isinstance(data, dict):
             data["flood_wait"] = flood_wait
         else:
             data = {"result": data, "flood_wait": flood_wait}
+
+    data = apply_json_transforms(data, results_only=results_only, select=select)
     json.dump(data, sys.stdout, default=str, ensure_ascii=False)
     sys.stdout.write("\n")
     sys.stdout.flush()
@@ -63,6 +156,8 @@ def output_result(
     columns: Sequence[str] | None = None,
     headers: Sequence[str] | None = None,
     flood_wait: int | None = None,
+    results_only: bool = False,
+    select: str | None = None,
 ) -> None:
     """Dispatch to the correct output formatter.
 
@@ -72,7 +167,7 @@ def output_result(
     and *columns* selects which keys to display.
     """
     if fmt == "json":
-        output_json(data, flood_wait=flood_wait)
+        output_json(data, flood_wait=flood_wait, results_only=results_only, select=select)
         return
 
     if not isinstance(data, list):
