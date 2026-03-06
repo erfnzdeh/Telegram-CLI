@@ -89,3 +89,8 @@ logs/
 
 # Local config directory (if created in project)
 .telegram-forwarder/
+.tlgr/
+
+# TOML configs with secrets
+webhook.toml
+routes.toml
