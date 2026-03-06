@@ -38,24 +38,22 @@ def output_human(
     *,
     headers: Sequence[str] | None = None,
 ) -> None:
-    """Write a formatted table to stdout using rich."""
-    try:
-        from rich.console import Console
-        from rich.table import Table
+    """Write space-padded columns to stdout (kubectl / docker style)."""
+    display_headers = headers or columns
+    cells = [[str(row.get(c, "")) for c in columns] for row in rows]
 
-        console = Console()
-        table = Table(show_header=True, header_style="bold")
+    widths = [len(h) for h in display_headers]
+    for cell_row in cells:
+        for i, v in enumerate(cell_row):
+            widths[i] = max(widths[i], len(v))
 
-        display_headers = headers or columns
-        for h in display_headers:
-            table.add_column(h)
-
-        for row in rows:
-            table.add_row(*(str(row.get(c, "")) for c in columns))
-
-        console.print(table)
-    except ImportError:
-        output_plain(rows, columns)
+    gap = "   "
+    header_line = gap.join(h.upper().ljust(w) for h, w in zip(display_headers, widths))
+    print(header_line.rstrip())
+    for cell_row in cells:
+        line = gap.join(v.ljust(w) for v, w in zip(cell_row, widths))
+        print(line.rstrip())
+    sys.stdout.flush()
 
 
 def output_result(
