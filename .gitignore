@@ -94,3 +94,5 @@ logs/
 # TOML configs with secrets
 webhook.toml
 jobs.toml
+
+.cursor/
