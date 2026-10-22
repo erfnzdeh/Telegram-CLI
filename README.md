@@ -2,7 +2,7 @@
 
 <p align="center"><img src="assets/brand/logo-512.png" width="160" alt="tlgr logo"></p>
 
-<p align="center"><a href="https://www.producthunt.com/products/tlgr"><img src="https://img.shields.io/badge/Product_Hunt-Launching_Sep_29-DA552F?style=for-the-badge&logo=producthunt&logoColor=white" alt="tlgr is launching on Product Hunt on September 29"></a></p>
+<p align="center"><a href="https://www.producthunt.com/products/tlgr"><img src="https://img.shields.io/badge/Product_Hunt-Live_now-DA552F?style=for-the-badge&logo=producthunt&logoColor=white" alt="tlgr is live on Product Hunt"></a></p>
 
 Full Telegram account control from the terminal. Agent-friendly, daemon-based, with webhook event push.
 
